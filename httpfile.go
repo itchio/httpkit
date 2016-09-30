@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"math"
 	"net/http"
 	"net/url"
@@ -83,6 +84,58 @@ func (hr *httpReader) Discard(n int) (int, error) {
 		return discarded, errors.Wrap(err, 1)
 	}
 	return discarded, nil
+}
+
+func (hr *httpReader) Connect() error {
+	if hr.body != nil {
+		err := hr.body.Close()
+		if err != nil {
+			return err
+		}
+
+		hr.body = nil
+		hr.reader = nil
+	}
+
+	urlStr, err := hr.file.getURL()
+	if err != nil {
+		return errors.Wrap(err, 1)
+	}
+
+	req, err := http.NewRequest("GET", urlStr, nil)
+	if err != nil {
+		return errors.Wrap(err, 1)
+	}
+
+	byteRange := fmt.Sprintf("bytes=%d-", hr.offset)
+	req.Header.Set("Range", byteRange)
+
+	res, err := hr.file.client.Do(req)
+	if err != nil {
+		return errors.Wrap(err, 1)
+	}
+	hr.file.log("did request, status %d", res.StatusCode)
+
+	if res.StatusCode == 200 && hr.offset > 0 {
+		err = fmt.Errorf("HTTP Range header not supported by %s, bailing out", req.Host)
+		return errors.Wrap(err, 1)
+	}
+
+	if res.StatusCode/100 != 2 {
+		body, err := ioutil.ReadAll(res.Body)
+		if err != nil {
+			body = []byte("could not read error body")
+			err = nil
+		}
+
+		err = fmt.Errorf("HTTP %d returned by %s (%s), bailing out", res.StatusCode, req.Host, string(body))
+		return errors.Wrap(err, 1)
+	}
+
+	hr.reader = bufio.NewReaderSize(res.Body, int(maxDiscard))
+	hr.body = res.Body
+
+	return nil
 }
 
 func (hr *httpReader) Close() error {
@@ -193,51 +246,19 @@ func (hf *HTTPFile) borrowReader(offset int64) (*httpReader, error) {
 		return reader, nil
 	}
 
+	// provision a new reader
 	hf.log("borrow: making fresh for offset %d", offset)
-
-	// provision a new one
-	urlStr, err := hf.getURL()
-	if err != nil {
-		return nil, errors.Wrap(err, 1)
-	}
-
-	req, err := http.NewRequest("GET", urlStr, nil)
-	if err != nil {
-		return nil, errors.Wrap(err, 1)
-	}
-
-	byteRange := fmt.Sprintf("bytes=%d-", offset)
-	req.Header.Set("Range", byteRange)
-
-	res, err := hf.client.Do(req)
-	if err != nil {
-		return nil, errors.Wrap(err, 1)
-	}
-	hf.log("did request, status %d", res.StatusCode)
-
-	if res.StatusCode == 200 && offset > 0 {
-		err = fmt.Errorf("HTTP Range header not supported by %s, bailing out", req.Host)
-		return nil, errors.Wrap(err, 1)
-	}
-
-	if res.StatusCode/100 != 2 {
-		body, err := ioutil.ReadAll(res.Body)
-		if err != nil {
-			body = []byte("could not read error body")
-			err = nil
-		}
-
-		err = fmt.Errorf("HTTP %d returned by %s (%s), bailing out", res.StatusCode, req.Host, string(body))
-		return nil, errors.Wrap(err, 1)
-	}
 
 	reader := &httpReader{
 		file:      hf,
 		id:        uuid.NewV4().String(),
 		touchedAt: time.Now(),
 		offset:    offset,
-		reader:    bufio.NewReaderSize(res.Body, int(maxDiscard)),
-		body:      res.Body,
+	}
+
+	err := reader.Connect()
+	if err != nil {
+		return nil, err
 	}
 
 	return reader, nil
@@ -321,7 +342,15 @@ func (hf *HTTPFile) ReadAt(data []byte, offset int64) (int, error) {
 		totalBytesRead += bytesRead
 
 		if err != nil {
-			return totalBytesRead, errors.Wrap(err, 1)
+			if errors.Is(err, io.ErrUnexpectedEOF) {
+				log.Printf("\n\nGot unexpected eof, retrying\n\n")
+				err := reader.Connect()
+				if err != nil {
+					return totalBytesRead, err
+				}
+			} else {
+				return totalBytesRead, errors.Wrap(err, 1)
+			}
 		}
 	}
 
