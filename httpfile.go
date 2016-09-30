@@ -72,7 +72,7 @@ func (hr *httpReader) Read(data []byte) (int, error) {
 	hr.offset += int64(readBytes)
 
 	if err != nil {
-		return readBytes, errors.Wrap(err, 1)
+		return readBytes, err
 	}
 	return readBytes, nil
 }
@@ -83,7 +83,7 @@ func (hr *httpReader) Discard(n int) (int, error) {
 	hr.offset += int64(discarded)
 
 	if err != nil {
-		return discarded, errors.Wrap(err, 1)
+		return discarded, err
 	}
 	return discarded, nil
 }
@@ -101,12 +101,12 @@ func (hr *httpReader) Connect() error {
 
 	urlStr, err := hr.file.getURL()
 	if err != nil {
-		return errors.Wrap(err, 1)
+		return err
 	}
 
 	req, err := http.NewRequest("GET", urlStr, nil)
 	if err != nil {
-		return errors.Wrap(err, 1)
+		return err
 	}
 
 	byteRange := fmt.Sprintf("bytes=%d-", hr.offset)
@@ -114,13 +114,13 @@ func (hr *httpReader) Connect() error {
 
 	res, err := hr.file.client.Do(req)
 	if err != nil {
-		return errors.Wrap(err, 1)
+		return err
 	}
 	hr.file.log("did request, status %d", res.StatusCode)
 
 	if res.StatusCode == 200 && hr.offset > 0 {
 		err = fmt.Errorf("HTTP Range header not supported by %s, bailing out", req.Host)
-		return errors.Wrap(err, 1)
+		return err
 	}
 
 	if res.StatusCode/100 != 2 {
@@ -131,7 +131,7 @@ func (hr *httpReader) Connect() error {
 		}
 
 		err = fmt.Errorf("HTTP %d returned by %s (%s), bailing out", res.StatusCode, req.Host, string(body))
-		return errors.Wrap(err, 1)
+		return err
 	}
 
 	hr.reader = bufio.NewReaderSize(res.Body, int(maxDiscard))
@@ -144,7 +144,7 @@ func (hr *httpReader) Close() error {
 	err := hr.body.Close()
 
 	if err != nil {
-		return errors.Wrap(err, 1)
+		return err
 	}
 	return nil
 }
@@ -157,22 +157,22 @@ var _ io.Closer = (*HTTPFile)(nil)
 func New(getURL GetURLFunc, needsRenewal NeedsRenewalFunc, client *http.Client) (*HTTPFile, error) {
 	urlStr, err := getURL()
 	if err != nil {
-		return nil, errors.Wrap(err, 1)
+		return nil, err
 	}
 
 	parsedUrl, err := url.Parse(urlStr)
 	if err != nil {
-		return nil, errors.Wrap(err, 1)
+		return nil, err
 	}
 
 	req, err := http.NewRequest("HEAD", urlStr, nil)
 	if err != nil {
-		return nil, errors.Wrap(err, 1)
+		return nil, err
 	}
 
 	res, err := client.Do(req)
 	if err != nil {
-		return nil, errors.Wrap(err, 1)
+		return nil, err
 	}
 
 	if res.StatusCode != 200 {
@@ -181,7 +181,7 @@ func New(getURL GetURLFunc, needsRenewal NeedsRenewalFunc, client *http.Client) 
 		}
 
 		err = fmt.Errorf("Expected HTTP 200, got HTTP %d for %s", res.StatusCode, urlStr)
-		return nil, errors.Wrap(err, 1)
+		return nil, err
 	}
 
 	hf := &HTTPFile{
@@ -215,7 +215,7 @@ func (hf *HTTPFile) borrowReader(offset int64) (*httpReader, error) {
 
 			err := reader.Close()
 			if err != nil {
-				return nil, errors.Wrap(err, 1)
+				return nil, err
 			}
 			continue
 		}
@@ -241,7 +241,7 @@ func (hf *HTTPFile) borrowReader(offset int64) (*httpReader, error) {
 			// XXX: not int64-clean
 			_, err := reader.Discard(int(bestDiff))
 			if err != nil {
-				return nil, errors.Wrap(err, 1)
+				return nil, err
 			}
 		}
 
@@ -311,7 +311,7 @@ func (hf *HTTPFile) Read(data []byte) (int, error) {
 
 	reader, err := hf.borrowReader(hf.offset)
 	if err != nil {
-		return 0, errors.Wrap(err, 1)
+		return 0, err
 	}
 
 	defer hf.returnReader(reader)
@@ -320,7 +320,7 @@ func (hf *HTTPFile) Read(data []byte) (int, error) {
 	hf.offset += int64(bytesRead)
 
 	if err != nil {
-		return bytesRead, errors.Wrap(err, 1)
+		return bytesRead, err
 	}
 	return bytesRead, nil
 }
@@ -330,7 +330,7 @@ func (hf *HTTPFile) ReadAt(data []byte, offset int64) (int, error) {
 
 	reader, err := hf.borrowReader(offset)
 	if err != nil {
-		return 0, errors.Wrap(err, 1)
+		return 0, err
 	}
 
 	defer hf.returnReader(reader)
@@ -346,12 +346,12 @@ func (hf *HTTPFile) ReadAt(data []byte, offset int64) (int, error) {
 		if err != nil {
 			if errors.Is(err, io.ErrUnexpectedEOF) {
 				log.Printf("\n\nGot unexpected eof, retrying\n\n")
-				err := reader.Connect()
+				err = reader.Connect()
 				if err != nil {
 					return totalBytesRead, err
 				}
 			} else {
-				return totalBytesRead, errors.Wrap(err, 1)
+				return totalBytesRead, err
 			}
 		}
 	}
@@ -370,7 +370,7 @@ func (hf *HTTPFile) Close() error {
 	for id, reader := range hf.readers {
 		err := reader.Close()
 		if err != nil {
-			return errors.Wrap(err, 1)
+			return err
 		}
 
 		delete(hf.readers, id)
