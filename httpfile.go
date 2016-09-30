@@ -14,16 +14,18 @@ import (
 	"time"
 
 	"github.com/go-errors/errors"
-	"github.com/itchio/wharf/pwr"
 	uuid "github.com/satori/go.uuid"
 )
 
-// GetURL returns a URL we can download the resource from.
+// A GetURLFunc returns a URL we can download the resource from.
 // It's handy to have this as a function rather than a constant for signed expiring URLs
 type GetURLFunc func() (urlString string, err error)
 
-// Expired analyzes an HTTP request and returns true if it needs to be renewed
+// A NeedsRenewalFunc analyzes an HTTP request and returns true if it needs to be renewed
 type NeedsRenewalFunc func(req *http.Request) bool
+
+// A LogFunc prints debug message
+type LogFunc func(msg string)
 
 // amount we're willing to download and throw away
 const maxDiscard int64 = 1 * 1024 * 1024 // 1MB
@@ -35,7 +37,7 @@ type HTTPFile struct {
 	needsRenewal NeedsRenewalFunc
 	client       *http.Client
 
-	Consumer *pwr.StateConsumer
+	Log LogFunc
 
 	name   string
 	size   int64
@@ -380,9 +382,9 @@ func (hf *HTTPFile) Close() error {
 }
 
 func (hf *HTTPFile) log(format string, args ...interface{}) {
-	if hf.Consumer == nil {
+	if hf.Log == nil {
 		return
 	}
 
-	hf.Consumer.Infof(format, args...)
+	hf.Log(fmt.Sprintf(format, args...))
 }
