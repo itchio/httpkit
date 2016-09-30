@@ -67,18 +67,31 @@ func (hr *httpReader) Read(data []byte) (int, error) {
 	hr.touchedAt = time.Now()
 	readBytes, err := hr.reader.Read(data)
 	hr.offset += int64(readBytes)
-	return readBytes, err
+
+	if err != nil {
+		return readBytes, errors.Wrap(err, 1)
+	}
+	return readBytes, nil
 }
 
 func (hr *httpReader) Discard(n int) (int, error) {
 	hr.touchedAt = time.Now()
 	discarded, err := hr.reader.Discard(n)
 	hr.offset += int64(discarded)
-	return discarded, err
+
+	if err != nil {
+		return discarded, errors.Wrap(err, 1)
+	}
+	return discarded, nil
 }
 
 func (hr *httpReader) Close() error {
-	return hr.body.Close()
+	err := hr.body.Close()
+
+	if err != nil {
+		return errors.Wrap(err, 1)
+	}
+	return nil
 }
 
 var _ io.Seeker = (*HTTPFile)(nil)
@@ -147,7 +160,7 @@ func (hf *HTTPFile) borrowReader(offset int64) (*httpReader, error) {
 
 			err := reader.Close()
 			if err != nil {
-				return nil, err
+				return nil, errors.Wrap(err, 1)
 			}
 			continue
 		}
@@ -173,7 +186,7 @@ func (hf *HTTPFile) borrowReader(offset int64) (*httpReader, error) {
 			// XXX: not int64-clean
 			_, err := reader.Discard(int(bestDiff))
 			if err != nil {
-				return nil, err
+				return nil, errors.Wrap(err, 1)
 			}
 		}
 
@@ -275,7 +288,7 @@ func (hf *HTTPFile) Read(data []byte) (int, error) {
 
 	reader, err := hf.borrowReader(hf.offset)
 	if err != nil {
-		return 0, err
+		return 0, errors.Wrap(err, 1)
 	}
 
 	defer hf.returnReader(reader)
@@ -283,7 +296,10 @@ func (hf *HTTPFile) Read(data []byte) (int, error) {
 	bytesRead, err := reader.Read(data)
 	hf.offset += int64(bytesRead)
 
-	return bytesRead, err
+	if err != nil {
+		return bytesRead, errors.Wrap(err, 1)
+	}
+	return bytesRead, nil
 }
 
 func (hf *HTTPFile) ReadAt(data []byte, offset int64) (int, error) {
@@ -291,7 +307,7 @@ func (hf *HTTPFile) ReadAt(data []byte, offset int64) (int, error) {
 
 	reader, err := hf.borrowReader(offset)
 	if err != nil {
-		return 0, err
+		return 0, errors.Wrap(err, 1)
 	}
 
 	defer hf.returnReader(reader)
@@ -305,7 +321,7 @@ func (hf *HTTPFile) ReadAt(data []byte, offset int64) (int, error) {
 		totalBytesRead += bytesRead
 
 		if err != nil {
-			return totalBytesRead, err
+			return totalBytesRead, errors.Wrap(err, 1)
 		}
 	}
 
