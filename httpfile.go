@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"log"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -348,6 +349,15 @@ func (hf *HTTPFile) ReadAt(data []byte, offset int64) (int, error) {
 				log.Printf("\n\nGot unexpected eof, retrying\n\n")
 				err = reader.Connect()
 				if err != nil {
+					return totalBytesRead, err
+				}
+			} else if opError, ok := err.(*net.OpError); ok {
+				if opError.Timeout() || opError.Temporary() {
+					err = reader.Connect()
+					if err != nil {
+						return totalBytesRead, err
+					}
+				} else {
 					return totalBytesRead, err
 				}
 			} else {
