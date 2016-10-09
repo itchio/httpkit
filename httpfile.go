@@ -22,8 +22,8 @@ import (
 // It's handy to have this as a function rather than a constant for signed expiring URLs
 type GetURLFunc func() (urlString string, err error)
 
-// A NeedsRenewalFunc analyzes an HTTP request and returns true if it needs to be renewed
-type NeedsRenewalFunc func(req *http.Request) bool
+// A NeedsRenewalFunc analyzes an HTTP response and returns true if it needs to be renewed
+type NeedsRenewalFunc func(res *http.Response, body []byte) bool
 
 // A LogFunc prints debug message
 type LogFunc func(msg string)
@@ -34,7 +34,6 @@ const maxDiscard int64 = 1 * 1024 * 1024 // 1MB
 var ErrNotFound = errors.New("HTTP file not found on server")
 
 type HTTPFile struct {
-	currentURL   string
 	getURL       GetURLFunc
 	needsRenewal NeedsRenewalFunc
 	client       *http.Client
@@ -51,6 +50,9 @@ type HTTPFile struct {
 
 	readers      map[string]*httpReader
 	readersMutex sync.Mutex
+
+	currentURL string
+	urlMutex   sync.Mutex
 }
 
 type httpReader struct {
@@ -101,40 +103,72 @@ func (hr *httpReader) Connect() error {
 		hr.reader = nil
 	}
 
-	urlStr := hr.file.currentURL
-
-	req, err := http.NewRequest("GET", urlStr, nil)
-	if err != nil {
-		return err
-	}
-
-	byteRange := fmt.Sprintf("bytes=%d-", hr.offset)
-	req.Header.Set("Range", byteRange)
-
-	res, err := hr.file.client.Do(req)
-	if err != nil {
-		return err
-	}
-	hr.file.log("did request, status %d", res.StatusCode)
-
-	if res.StatusCode == 200 && hr.offset > 0 {
-		err = fmt.Errorf("HTTP Range header not supported by %s, bailing out", req.Host)
-		return err
-	}
-
-	if res.StatusCode/100 != 2 {
-		body, err := ioutil.ReadAll(res.Body)
+	tryUrl := func(urlStr string) (bool, error) {
+		req, err := http.NewRequest("GET", urlStr, nil)
 		if err != nil {
-			body = []byte("could not read error body")
-			err = nil
+			return false, err
 		}
 
-		err = fmt.Errorf("HTTP %d returned by %s (%s), bailing out", res.StatusCode, req.Host, string(body))
+		byteRange := fmt.Sprintf("bytes=%d-", hr.offset)
+		req.Header.Set("Range", byteRange)
+
+		res, err := hr.file.client.Do(req)
+		if err != nil {
+			return false, err
+		}
+		hr.file.log("did request, status %d", res.StatusCode)
+
+		if res.StatusCode == 200 && hr.offset > 0 {
+			defer res.Body.Close()
+
+			err = fmt.Errorf("HTTP Range header not supported by %s, bailing out", req.Host)
+			return false, err
+		}
+
+		if res.StatusCode/100 != 2 {
+			defer res.Body.Close()
+
+			body, err := ioutil.ReadAll(res.Body)
+			if err != nil {
+				body = []byte("could not read error body")
+				err = nil
+			}
+
+			if hr.file.needsRenewal(res, body) {
+				return true, nil
+			}
+
+			err = fmt.Errorf("HTTP %d returned by %s (%s), bailing out", res.StatusCode, req.Host, string(body))
+			return false, err
+		}
+
+		hr.reader = bufio.NewReaderSize(res.Body, int(maxDiscard))
+		hr.body = res.Body
+		return false, nil
+	}
+
+	urlStr := hr.file.getCurrentURL()
+	shouldRetry, err := tryUrl(urlStr)
+	if err != nil {
 		return err
 	}
 
-	hr.reader = bufio.NewReaderSize(res.Body, int(maxDiscard))
-	hr.body = res.Body
+	tries := 5
+
+	// TODO: use exponential backoff
+	for shouldRetry && tries > 0 {
+		tries--
+
+		urlStr, err = hr.file.renewURL()
+		if err != nil {
+			return err
+		}
+
+		shouldRetry, err = tryUrl(urlStr)
+		if err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
@@ -274,6 +308,26 @@ func (hf *HTTPFile) returnReader(reader *httpReader) {
 
 	reader.touchedAt = time.Now()
 	hf.readers[reader.id] = reader
+}
+
+func (hf *HTTPFile) getCurrentURL() string {
+	hf.urlMutex.Lock()
+	defer hf.urlMutex.Unlock()
+
+	return hf.currentURL
+}
+
+func (hf *HTTPFile) renewURL() (string, error) {
+	hf.urlMutex.Lock()
+	defer hf.urlMutex.Unlock()
+
+	urlStr, err := hf.getURL()
+	if err != nil {
+		return "", err
+	}
+
+	hf.currentURL = urlStr
+	return hf.currentURL, nil
 }
 
 func (hf *HTTPFile) Stat() (os.FileInfo, error) {

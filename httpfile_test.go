@@ -34,14 +34,14 @@ func (ifs *itchfs) GetURL() (string, error) {
 	return ifs.url, nil
 }
 
-func (ifs *itchfs) NeedsRenewal(req *http.Request) bool {
+func (ifs *itchfs) NeedsRenewal(res *http.Response, body []byte) bool {
 	return false
 }
 
 func Test_OpenRemoteDownloadBuild(t *testing.T) {
 	fakeData := []byte("aaaabbbb")
 
-	storageServer := fakeStorage(t, fakeData, fakeStorageSettings{})
+	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{})
 	defer storageServer.CloseClientConnections()
 
 	ifs := &itchfs{storageServer.URL}
@@ -81,7 +81,7 @@ func newSimple(url string) (*HTTPFile, error) {
 		return url, nil
 	}
 
-	needsRenewal := func(req *http.Request) bool {
+	needsRenewal := func(res *http.Response, body []byte) bool {
 		return false
 	}
 
@@ -91,7 +91,7 @@ func newSimple(url string) (*HTTPFile, error) {
 func Test_HttpFile(t *testing.T) {
 	fakeData := []byte("aaaabbbb")
 
-	storageServer := fakeStorage(t, fakeData, fakeStorageSettings{})
+	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{})
 	defer storageServer.CloseClientConnections()
 
 	f, err := newSimple(storageServer.URL)
@@ -117,7 +117,7 @@ func Test_HttpFile(t *testing.T) {
 func Test_HttpFileNotFound(t *testing.T) {
 	fakeData := []byte("aaaabbbb")
 
-	storageServer := fakeStorage(t, fakeData, fakeStorageSettings{
+	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{
 		simulateNotFound: true,
 	})
 	defer storageServer.CloseClientConnections()
@@ -130,7 +130,7 @@ func Test_HttpFileNotFound(t *testing.T) {
 func Test_HttpFileNoRange(t *testing.T) {
 	fakeData := []byte("aaaabbbb")
 
-	storageServer := fakeStorage(t, fakeData, fakeStorageSettings{
+	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{
 		simulateNoRangeSupport: true,
 	})
 	defer storageServer.CloseClientConnections()
@@ -148,13 +148,84 @@ func Test_HttpFileNoRange(t *testing.T) {
 func Test_HttpFile503(t *testing.T) {
 	fakeData := []byte("aaaabbbb")
 
-	storageServer := fakeStorage(t, fakeData, fakeStorageSettings{
+	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{
 		simulateOtherStatus: 503,
 	})
 	defer storageServer.CloseClientConnections()
 
 	_, err := newSimple(storageServer.URL)
 	assert.Error(t, err)
+}
+
+func Test_HttpFileURLRenewal(t *testing.T) {
+	fakeData := make([]byte, 16)
+
+	ctx := &fakeStorageContext{
+		requiredT: 1,
+	}
+	storageServer := fakeStorage(t, fakeData, ctx)
+	defer storageServer.CloseClientConnections()
+
+	serverBaseURL, err := url.Parse(storageServer.URL)
+	assert.NoError(t, err)
+
+	renewalsAdvertised := 0
+	renewalsDone := 0
+
+	getURL := func() (string, error) {
+		renewalsDone++
+		sbuv := *serverBaseURL
+		newURL := &sbuv
+		query := newURL.Query()
+		query.Set("t", fmt.Sprintf("%d", ctx.requiredT))
+		newURL.RawQuery = query.Encode()
+		return newURL.String(), nil
+	}
+
+	needsRenewal := func(res *http.Response, body []byte) bool {
+		if res.StatusCode == 400 {
+			if body != nil && strings.Contains(string(body), expiredURLMessage) {
+				renewalsAdvertised++
+				return true
+			}
+		}
+		return false
+	}
+
+	hf, err := New(getURL, needsRenewal, http.DefaultClient)
+	assert.NoError(t, err)
+
+	assert.EqualValues(t, 1, ctx.numHEAD, "expected number of HEAD requests")
+	assert.EqualValues(t, 0, renewalsAdvertised, "expected number of renewals advertised")
+	assert.EqualValues(t, 1, renewalsDone, "expected number of renewals done")
+
+	readBuf := make([]byte, 1)
+
+	iteration := 0
+
+	for off := int64(15); off >= 0; off-- {
+		iteration++
+		readBytes, rErr := hf.ReadAt(readBuf, off)
+		assert.NoError(t, rErr)
+		assert.EqualValues(t, 1, readBytes)
+
+		assert.EqualValues(t, iteration+(iteration-1), ctx.numGET, "number of GET requests")
+		assert.EqualValues(t, iteration-1, renewalsAdvertised, "number of renewals advertised")
+		assert.EqualValues(t, iteration, renewalsDone, "number of renewals done")
+
+		ctx.requiredT++
+	}
+
+	ctx.requiredT--
+
+	readBuf2 := make([]byte, 15)
+	readBytes, rErr := hf.ReadAt(readBuf2, 1)
+	assert.NoError(t, rErr)
+	assert.EqualValues(t, len(readBuf2), readBytes)
+
+	assert.EqualValues(t, iteration+(iteration-1), ctx.numGET, "number of GET requests")
+	assert.EqualValues(t, iteration-1, renewalsAdvertised, "number of renewals advertised")
+	assert.EqualValues(t, iteration, renewalsDone, "number of renewals done")
 }
 
 var _bigFakeData []byte
@@ -172,7 +243,7 @@ func getBigFakeData() []byte {
 func Test_HttpFileSequentialReads(t *testing.T) {
 	fakeData := getBigFakeData()
 
-	storageServer := fakeStorage(t, fakeData, fakeStorageSettings{})
+	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{})
 	defer storageServer.CloseClientConnections()
 
 	hf, err := newSimple(storageServer.URL)
@@ -254,7 +325,7 @@ func Test_HttpFileSequentialReads(t *testing.T) {
 func Test_HttpFileConcurrentReadAt(t *testing.T) {
 	fakeData := []byte("abcdefghijklmnopqrstuvwxyz")
 
-	storageServer := fakeStorage(t, fakeData, fakeStorageSettings{
+	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{
 		delay: 10 * time.Millisecond,
 	})
 	defer storageServer.CloseClientConnections()
@@ -318,26 +389,32 @@ func Test_HttpFileConcurrentReadAt(t *testing.T) {
 // fake storage
 ////////////////////////
 
-type fakeStorageSettings struct {
+const expiredURLMessage = "Signed URL Expired"
+
+type fakeStorageContext struct {
 	delay                  time.Duration
 	simulateNoRangeSupport bool
 	simulateNotFound       bool
 	simulateOtherStatus    int
+	requiredT              int64
+	numGET                 int
+	numHEAD                int
 }
 
-func fakeStorage(t *testing.T, content []byte, settings fakeStorageSettings) *httptest.Server {
+func fakeStorage(t *testing.T, content []byte, ctx *fakeStorageContext) *httptest.Server {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if settings.simulateNotFound {
+		if ctx.simulateNotFound {
 			w.WriteHeader(404)
 			return
 		}
 
-		if settings.simulateOtherStatus != 0 {
-			w.WriteHeader(settings.simulateOtherStatus)
+		if ctx.simulateOtherStatus != 0 {
+			w.WriteHeader(ctx.simulateOtherStatus)
 			return
 		}
 
 		if r.Method == "HEAD" {
+			ctx.numHEAD++
 			w.Header().Set("content-length", fmt.Sprintf("%d", len(content)))
 			w.WriteHeader(200)
 			return
@@ -348,7 +425,21 @@ func fakeStorage(t *testing.T, content []byte, settings fakeStorageSettings) *ht
 			return
 		}
 
-		time.Sleep(settings.delay)
+		ctx.numGET++
+		time.Sleep(ctx.delay)
+
+		if ctx.requiredT > 0 {
+			t := r.URL.Query().Get("t")
+			if t != "" {
+				tVal, err := strconv.ParseInt(t, 10, 64)
+				if err == nil {
+					if tVal < ctx.requiredT {
+						http.Error(w, expiredURLMessage, 400)
+						return
+					}
+				}
+			}
+		}
 
 		w.Header().Set("content-type", "application/octet-stream")
 		rangeHeader := r.Header.Get("Range")
@@ -356,7 +447,7 @@ func fakeStorage(t *testing.T, content []byte, settings fakeStorageSettings) *ht
 		start := int64(0)
 		end := int64(len(content)) - 1
 
-		if rangeHeader == "" || settings.simulateNoRangeSupport {
+		if rangeHeader == "" || ctx.simulateNoRangeSupport {
 			w.WriteHeader(200)
 		} else {
 			equalTokens := strings.Split(rangeHeader, "=")
