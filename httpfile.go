@@ -34,6 +34,7 @@ const maxDiscard int64 = 1 * 1024 * 1024 // 1MB
 var ErrNotFound = errors.New("HTTP file not found on server")
 
 type HTTPFile struct {
+	currentURL   string
 	getURL       GetURLFunc
 	needsRenewal NeedsRenewalFunc
 	client       *http.Client
@@ -100,10 +101,7 @@ func (hr *httpReader) Connect() error {
 		hr.reader = nil
 	}
 
-	urlStr, err := hr.file.getURL()
-	if err != nil {
-		return err
-	}
+	urlStr := hr.file.currentURL
 
 	req, err := http.NewRequest("GET", urlStr, nil)
 	if err != nil {
@@ -186,6 +184,7 @@ func New(getURL GetURLFunc, needsRenewal NeedsRenewalFunc, client *http.Client) 
 	}
 
 	hf := &HTTPFile{
+		currentURL:   urlStr,
 		getURL:       getURL,
 		needsRenewal: needsRenewal,
 		client:       client,
@@ -369,11 +368,7 @@ func (hf *HTTPFile) ReadAt(data []byte, offset int64) (int, error) {
 	return totalBytesRead, nil
 }
 
-func (hf *HTTPFile) Close() error {
-	if hf.closed {
-		return nil
-	}
-
+func (hf *HTTPFile) closeAllReaders() error {
 	hf.readersMutex.Lock()
 	defer hf.readersMutex.Unlock()
 
@@ -384,6 +379,19 @@ func (hf *HTTPFile) Close() error {
 		}
 
 		delete(hf.readers, id)
+	}
+
+	return nil
+}
+
+func (hf *HTTPFile) Close() error {
+	if hf.closed {
+		return nil
+	}
+
+	err := hf.closeAllReaders()
+	if err != nil {
+		return err
 	}
 
 	hf.closed = true

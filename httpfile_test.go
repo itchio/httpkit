@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/alecthomas/assert"
+	"github.com/go-errors/errors"
 )
 
 type itchfs struct {
@@ -40,7 +41,7 @@ func (ifs *itchfs) NeedsRenewal(req *http.Request) bool {
 func Test_OpenRemoteDownloadBuild(t *testing.T) {
 	fakeData := []byte("aaaabbbb")
 
-	storageServer := fakeStorage(t, fakeData, time.Duration(0))
+	storageServer := fakeStorage(t, fakeData, fakeStorageSettings{})
 	defer storageServer.CloseClientConnections()
 
 	ifs := &itchfs{storageServer.URL}
@@ -90,7 +91,7 @@ func newSimple(url string) (*HTTPFile, error) {
 func Test_HttpFile(t *testing.T) {
 	fakeData := []byte("aaaabbbb")
 
-	storageServer := fakeStorage(t, fakeData, time.Duration(0))
+	storageServer := fakeStorage(t, fakeData, fakeStorageSettings{})
 	defer storageServer.CloseClientConnections()
 
 	f, err := newSimple(storageServer.URL)
@@ -113,6 +114,49 @@ func Test_HttpFile(t *testing.T) {
 	}
 }
 
+func Test_HttpFileNotFound(t *testing.T) {
+	fakeData := []byte("aaaabbbb")
+
+	storageServer := fakeStorage(t, fakeData, fakeStorageSettings{
+		simulateNotFound: true,
+	})
+	defer storageServer.CloseClientConnections()
+
+	_, err := newSimple(storageServer.URL)
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, ErrNotFound))
+}
+
+func Test_HttpFileNoRange(t *testing.T) {
+	fakeData := []byte("aaaabbbb")
+
+	storageServer := fakeStorage(t, fakeData, fakeStorageSettings{
+		simulateNoRangeSupport: true,
+	})
+	defer storageServer.CloseClientConnections()
+
+	hf, err := newSimple(storageServer.URL)
+	assert.NoError(t, err)
+
+	buf := make([]byte, 1)
+	_, err = hf.ReadAt(buf, 4)
+	assert.Error(t, err)
+
+	assert.NoError(t, hf.Close())
+}
+
+func Test_HttpFile503(t *testing.T) {
+	fakeData := []byte("aaaabbbb")
+
+	storageServer := fakeStorage(t, fakeData, fakeStorageSettings{
+		simulateOtherStatus: 503,
+	})
+	defer storageServer.CloseClientConnections()
+
+	_, err := newSimple(storageServer.URL)
+	assert.Error(t, err)
+}
+
 var _bigFakeData []byte
 
 func getBigFakeData() []byte {
@@ -128,7 +172,7 @@ func getBigFakeData() []byte {
 func Test_HttpFileSequentialReads(t *testing.T) {
 	fakeData := getBigFakeData()
 
-	storageServer := fakeStorage(t, fakeData, time.Duration(0))
+	storageServer := fakeStorage(t, fakeData, fakeStorageSettings{})
 	defer storageServer.CloseClientConnections()
 
 	hf, err := newSimple(storageServer.URL)
@@ -210,7 +254,9 @@ func Test_HttpFileSequentialReads(t *testing.T) {
 func Test_HttpFileConcurrentReadAt(t *testing.T) {
 	fakeData := []byte("abcdefghijklmnopqrstuvwxyz")
 
-	storageServer := fakeStorage(t, fakeData, time.Duration(10)*time.Millisecond)
+	storageServer := fakeStorage(t, fakeData, fakeStorageSettings{
+		delay: 10 * time.Millisecond,
+	})
 	defer storageServer.CloseClientConnections()
 
 	hf, err := newSimple(storageServer.URL)
@@ -272,8 +318,25 @@ func Test_HttpFileConcurrentReadAt(t *testing.T) {
 // fake storage
 ////////////////////////
 
-func fakeStorage(t *testing.T, content []byte, delay time.Duration) *httptest.Server {
+type fakeStorageSettings struct {
+	delay                  time.Duration
+	simulateNoRangeSupport bool
+	simulateNotFound       bool
+	simulateOtherStatus    int
+}
+
+func fakeStorage(t *testing.T, content []byte, settings fakeStorageSettings) *httptest.Server {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if settings.simulateNotFound {
+			w.WriteHeader(404)
+			return
+		}
+
+		if settings.simulateOtherStatus != 0 {
+			w.WriteHeader(settings.simulateOtherStatus)
+			return
+		}
+
 		if r.Method == "HEAD" {
 			w.Header().Set("content-length", fmt.Sprintf("%d", len(content)))
 			w.WriteHeader(200)
@@ -285,7 +348,7 @@ func fakeStorage(t *testing.T, content []byte, delay time.Duration) *httptest.Se
 			return
 		}
 
-		time.Sleep(delay)
+		time.Sleep(settings.delay)
 
 		w.Header().Set("content-type", "application/octet-stream")
 		rangeHeader := r.Header.Get("Range")
@@ -293,11 +356,9 @@ func fakeStorage(t *testing.T, content []byte, delay time.Duration) *httptest.Se
 		start := int64(0)
 		end := int64(len(content)) - 1
 
-		if rangeHeader == "" {
+		if rangeHeader == "" || settings.simulateNoRangeSupport {
 			w.WriteHeader(200)
 		} else {
-			// t.Logf("rangeHeader: %s", rangeHeader)
-
 			equalTokens := strings.Split(rangeHeader, "=")
 			if len(equalTokens) != 2 {
 				http.Error(w, "Invalid range header", 400)
