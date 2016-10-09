@@ -1,3 +1,5 @@
+*.coverprofile
+coverage.txt
 /src
 /pkg
 /bin

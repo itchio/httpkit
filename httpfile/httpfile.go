@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/go-errors/errors"
+	"github.com/itchio/httpkit/retrycontext"
 	uuid "github.com/satori/go.uuid"
 )
 
@@ -34,9 +35,10 @@ const maxDiscard int64 = 1 * 1024 * 1024 // 1MB
 var ErrNotFound = errors.New("HTTP file not found on server")
 
 type HTTPFile struct {
-	getURL       GetURLFunc
-	needsRenewal NeedsRenewalFunc
-	client       *http.Client
+	getURL        GetURLFunc
+	needsRenewal  NeedsRenewalFunc
+	client        *http.Client
+	retrySettings *retrycontext.Settings
 
 	Log LogFunc
 
@@ -148,25 +150,24 @@ func (hr *httpReader) Connect() error {
 	}
 
 	urlStr := hr.file.getCurrentURL()
-	shouldRetry, err := tryUrl(urlStr)
+	shouldRenew, err := tryUrl(urlStr)
 	if err != nil {
 		return err
 	}
 
-	tries := 5
-
-	// TODO: use exponential backoff
-	for shouldRetry && tries > 0 {
-		tries--
-
+	if shouldRenew {
 		urlStr, err = hr.file.renewURL()
 		if err != nil {
 			return err
 		}
 
-		shouldRetry, err = tryUrl(urlStr)
+		shouldRenew, err = tryUrl(urlStr)
 		if err != nil {
 			return err
+		}
+
+		if shouldRenew {
+			return fmt.Errorf("getting expired URLs from URL source (timezone issue?)")
 		}
 	}
 
@@ -187,49 +188,86 @@ var _ io.Reader = (*HTTPFile)(nil)
 var _ io.ReaderAt = (*HTTPFile)(nil)
 var _ io.Closer = (*HTTPFile)(nil)
 
-func New(getURL GetURLFunc, needsRenewal NeedsRenewalFunc, client *http.Client) (*HTTPFile, error) {
-	urlStr, err := getURL()
-	if err != nil {
-		return nil, err
+type Settings struct {
+	Client        *http.Client
+	RetrySettings *retrycontext.Settings
+}
+
+func New(getURL GetURLFunc, needsRenewal NeedsRenewalFunc, settings *Settings) (*HTTPFile, error) {
+	client := settings.Client
+	if client == nil {
+		client = http.DefaultClient
 	}
 
-	parsedUrl, err := url.Parse(urlStr)
-	if err != nil {
-		return nil, err
+	retryCtx := retrycontext.NewDefault()
+	if settings.RetrySettings != nil {
+		retryCtx.Settings = *settings.RetrySettings
 	}
 
-	req, err := http.NewRequest("HEAD", urlStr, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	res, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-
-	if res.StatusCode != 200 {
-		if res.StatusCode == 404 {
-			return nil, errors.Wrap(ErrNotFound, 1)
+	for retryCtx.ShouldTry() {
+		urlStr, err := getURL()
+		if err != nil {
+			// this assumes getURL does its own retrying
+			return nil, err
 		}
 
-		err = fmt.Errorf("Expected HTTP 200, got HTTP %d for %s", res.StatusCode, urlStr)
-		return nil, err
+		parsedUrl, err := url.Parse(urlStr)
+		if err != nil {
+			// can't recover from a bad url
+			return nil, err
+		}
+
+		req, err := http.NewRequest("HEAD", urlStr, nil)
+		if err != nil {
+			// internal error
+			return nil, err
+		}
+
+		res, err := client.Do(req)
+		if err != nil {
+			// we can recover from some client errors
+			// (example: temporarily offline, DNS failure, etc.)
+			retryCtx.Retry(err.Error())
+			continue
+		}
+
+		if res.StatusCode != 200 {
+			if res.StatusCode == 404 {
+				// no need to retry - it's not coming back
+				return nil, errors.Wrap(ErrNotFound, 1)
+			}
+
+			body, _ := ioutil.ReadAll(res.Body)
+			if needsRenewal(res, body) {
+				retryCtx.Retry(fmt.Sprintf("HTTP %d (needs renewal)", res.StatusCode))
+				continue
+			}
+
+			if res.StatusCode == 429 || res.StatusCode/100 == 5 {
+				retryCtx.Retry(fmt.Sprintf("HTTP %d (retrying)", res.StatusCode))
+				continue
+			}
+
+			return nil, fmt.Errorf("Expected HTTP 200, got HTTP %d, not retrying", res.StatusCode)
+		}
+
+		hf := &HTTPFile{
+			currentURL:    urlStr,
+			getURL:        getURL,
+			retrySettings: &retryCtx.Settings,
+			needsRenewal:  needsRenewal,
+			client:        client,
+
+			name:    parsedUrl.Path,
+			size:    res.ContentLength,
+			readers: make(map[string]*httpReader),
+
+			ReaderStaleThreshold: DefaultReaderStaleThreshold,
+		}
+		return hf, nil
 	}
 
-	hf := &HTTPFile{
-		currentURL:   urlStr,
-		getURL:       getURL,
-		needsRenewal: needsRenewal,
-		client:       client,
-
-		name:    parsedUrl.Path,
-		size:    res.ContentLength,
-		readers: make(map[string]*httpReader),
-
-		ReaderStaleThreshold: DefaultReaderStaleThreshold,
-	}
-	return hf, nil
+	return nil, fmt.Errorf("Could not access remote file. Last error: %s", retryCtx.LastMessage)
 }
 
 func (hf *HTTPFile) NumReaders() int {

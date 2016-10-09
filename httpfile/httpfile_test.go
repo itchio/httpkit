@@ -16,6 +16,7 @@ import (
 
 	"github.com/alecthomas/assert"
 	"github.com/go-errors/errors"
+	"github.com/itchio/httpkit/retrycontext"
 )
 
 type itchfs struct {
@@ -38,6 +39,16 @@ func (ifs *itchfs) NeedsRenewal(res *http.Response, body []byte) bool {
 	return false
 }
 
+func defaultSettings() *Settings {
+	return &Settings{
+		Client: http.DefaultClient,
+		RetrySettings: &retrycontext.Settings{
+			MaxTries: 5,
+			NoSleep:  true,
+		},
+	}
+}
+
 func Test_OpenRemoteDownloadBuild(t *testing.T) {
 	fakeData := []byte("aaaabbbb")
 
@@ -52,7 +63,7 @@ func Test_OpenRemoteDownloadBuild(t *testing.T) {
 	getURL, needsRenewal, err := ifs.MakeResource(u)
 	assert.NoError(t, err)
 
-	f, err := New(getURL, needsRenewal, http.DefaultClient)
+	f, err := New(getURL, needsRenewal, defaultSettings())
 	assert.NoError(t, err)
 
 	s, err := f.Stat()
@@ -85,7 +96,7 @@ func newSimple(url string) (*HTTPFile, error) {
 		return false
 	}
 
-	return New(getURL, needsRenewal, http.DefaultClient)
+	return New(getURL, needsRenewal, defaultSettings())
 }
 
 func Test_HttpFile(t *testing.T) {
@@ -157,6 +168,67 @@ func Test_HttpFile503(t *testing.T) {
 	assert.Error(t, err)
 }
 
+type codeDisruption struct {
+	code    int
+	message string
+}
+
+func Test_HttpFileCodeDisruptions(t *testing.T) {
+	fakeData := []byte("aaaabbbb")
+
+	codeDisruptions := []codeDisruption{
+		{429, "Too Many Requests"},
+		{500, "Internal Server Error"},
+		{502, "Bad Gateway"},
+		{503, "Service Unavailable"},
+	}
+
+	for _, cd := range codeDisruptions {
+		storageServer := fakeStorage(t, fakeData, &fakeStorageContext{
+			disruption: &storageDisruption{
+				streak: 3,
+				handler: func(w http.ResponseWriter) {
+					http.Error(w, cd.message, cd.code)
+				},
+			},
+		})
+		defer storageServer.CloseClientConnections()
+
+		_, err := newSimple(storageServer.URL)
+		assert.NoError(t, err)
+	}
+
+	func() {
+		storageServer := fakeStorage(t, fakeData, &fakeStorageContext{
+			disruption: &storageDisruption{
+				streak: 6, // one over default retry count
+				handler: func(w http.ResponseWriter) {
+					http.Error(w, "Just messing with you", 503)
+				},
+			},
+		})
+		defer storageServer.CloseClientConnections()
+
+		_, err := newSimple(storageServer.URL)
+		assert.Error(t, err)
+	}()
+
+	func() {
+		storageServer := fakeStorage(t, fakeData, &fakeStorageContext{
+			disruption: &storageDisruption{
+				streak: 1, // only one non-retriable should be enough
+				handler: func(w http.ResponseWriter) {
+					http.Error(w, "I'm a teapot", 418)
+				},
+			},
+		})
+		defer storageServer.CloseClientConnections()
+
+		_, err := newSimple(storageServer.URL)
+		assert.Error(t, err)
+	}()
+}
+
 func Test_HttpFileURLRenewal(t *testing.T) {
 	fakeData := make([]byte, 16)
 
@@ -169,6 +241,7 @@ func Test_HttpFileURLRenewal(t *testing.T) {
 	serverBaseURL, err := url.Parse(storageServer.URL)
 	assert.NoError(t, err)
 
+	giveExpired := false
 	renewalsAdvertised := 0
 	renewalsDone := 0
 
@@ -177,22 +250,27 @@ func Test_HttpFileURLRenewal(t *testing.T) {
 		sbuv := *serverBaseURL
 		newURL := &sbuv
 		query := newURL.Query()
-		query.Set("t", fmt.Sprintf("%d", ctx.requiredT))
-		newURL.RawQuery = query.Encode()
+
+		t := ctx.requiredT
+		if giveExpired {
+			t = 0
+			giveExpired = false
+		}
+
+		query.Set("t", fmt.Sprintf("%d", t))
+		newURL.RawQuery = query.Encode() // apparently needed for URL.String() to behave
 		return newURL.String(), nil
 	}
 
 	needsRenewal := func(res *http.Response, body []byte) bool {
 		if res.StatusCode == 400 {
-			if body != nil && strings.Contains(string(body), expiredURLMessage) {
-				renewalsAdvertised++
-				return true
-			}
+			renewalsAdvertised++
+			return true
 		}
 		return false
 	}
 
-	hf, err := New(getURL, needsRenewal, http.DefaultClient)
+	hf, err := New(getURL, needsRenewal, defaultSettings())
 	assert.NoError(t, err)
 
 	assert.EqualValues(t, 1, ctx.numHEAD, "expected number of HEAD requests")
@@ -226,6 +304,19 @@ func Test_HttpFileURLRenewal(t *testing.T) {
 	assert.EqualValues(t, iteration+(iteration-1), ctx.numGET, "number of GET requests")
 	assert.EqualValues(t, iteration-1, renewalsAdvertised, "number of renewals advertised")
 	assert.EqualValues(t, iteration, renewalsDone, "number of renewals done")
+
+	// now start with an expired URL
+	renewalsDone = 0
+	renewalsAdvertised = 0
+	giveExpired = true
+
+	ctx.requiredT = 3000
+
+	hf, err = New(getURL, needsRenewal, defaultSettings())
+	assert.NoError(t, err)
+
+	assert.EqualValues(t, 1, renewalsAdvertised, "number of renewals advertised")
+	assert.EqualValues(t, 2, renewalsDone, "number of renewals done")
 }
 
 var _bigFakeData []byte
@@ -399,6 +490,20 @@ type fakeStorageContext struct {
 	requiredT              int64
 	numGET                 int
 	numHEAD                int
+	disruption             *storageDisruption
+}
+
+type disruptionHandlerFunc func(w http.ResponseWriter)
+
+type storageDisruption struct {
+	// how many errors to return in a row before succeeding
+	streak int
+
+	// what to do when the disruption happens
+	handler disruptionHandlerFunc
+
+	// internal
+	counter int
 }
 
 func fakeStorage(t *testing.T, content []byte, ctx *fakeStorageContext) *httptest.Server {
@@ -413,8 +518,38 @@ func fakeStorage(t *testing.T, content []byte, ctx *fakeStorageContext) *httptes
 			return
 		}
 
+		disrupt := ctx.disruption
+		if disrupt != nil {
+			if disrupt.counter < disrupt.streak {
+				disrupt.handler(w)
+				disrupt.counter++
+				return
+			} else {
+				disrupt.counter = 0
+			}
+		}
+
+		hasExpired := false
+
+		if ctx.requiredT > 0 {
+			t := r.URL.Query().Get("t")
+			if t != "" {
+				tVal, err := strconv.ParseInt(t, 10, 64)
+				if err == nil {
+					if tVal < ctx.requiredT {
+						hasExpired = true
+					}
+				}
+			}
+		}
+
 		if r.Method == "HEAD" {
 			ctx.numHEAD++
+			if hasExpired {
+				http.Error(w, expiredURLMessage, 400)
+				return
+			}
+
 			w.Header().Set("content-length", fmt.Sprintf("%d", len(content)))
 			w.WriteHeader(200)
 			return
@@ -426,20 +561,12 @@ func fakeStorage(t *testing.T, content []byte, ctx *fakeStorageContext) *httptes
 		}
 
 		ctx.numGET++
-		time.Sleep(ctx.delay)
-
-		if ctx.requiredT > 0 {
-			t := r.URL.Query().Get("t")
-			if t != "" {
-				tVal, err := strconv.ParseInt(t, 10, 64)
-				if err == nil {
-					if tVal < ctx.requiredT {
-						http.Error(w, expiredURLMessage, 400)
-						return
-					}
-				}
-			}
+		if hasExpired {
+			http.Error(w, expiredURLMessage, 400)
+			return
 		}
+
+		time.Sleep(ctx.delay)
 
 		w.Header().Set("content-type", "application/octet-stream")
 		rangeHeader := r.Header.Get("Range")
