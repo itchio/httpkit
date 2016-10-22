@@ -524,9 +524,8 @@ func fakeStorage(t *testing.T, content []byte, ctx *fakeStorageContext) *httptes
 				disrupt.handler(w)
 				disrupt.counter++
 				return
-			} else {
-				disrupt.counter = 0
 			}
+			disrupt.counter = 0
 		}
 
 		hasExpired := false
