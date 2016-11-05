@@ -254,7 +254,7 @@ func New(getURL GetURLFunc, needsRenewal NeedsRenewalFunc, settings *Settings) (
 			return nil, err
 		}
 
-		if res.StatusCode != 206 {
+		if res.StatusCode != 206 && res.StatusCode != 200 {
 			if res.StatusCode == 404 {
 				// no need to retry - it's not coming back
 				return nil, errors.Wrap(ErrNotFound, 1)
