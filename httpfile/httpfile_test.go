@@ -273,7 +273,7 @@ func Test_HttpFileURLRenewal(t *testing.T) {
 	hf, err := New(getURL, needsRenewal, defaultSettings())
 	assert.NoError(t, err)
 
-	assert.EqualValues(t, 1, ctx.numHEAD, "expected number of HEAD requests")
+	assert.EqualValues(t, 1, ctx.numGET, "expected number of GET requests")
 	assert.EqualValues(t, 0, renewalsAdvertised, "expected number of renewals advertised")
 	assert.EqualValues(t, 1, renewalsDone, "expected number of renewals done")
 
@@ -287,7 +287,7 @@ func Test_HttpFileURLRenewal(t *testing.T) {
 		assert.NoError(t, rErr)
 		assert.EqualValues(t, 1, readBytes)
 
-		assert.EqualValues(t, iteration+(iteration-1), ctx.numGET, "number of GET requests")
+		assert.EqualValues(t, iteration+iteration, ctx.numGET, "number of GET requests")
 		assert.EqualValues(t, iteration-1, renewalsAdvertised, "number of renewals advertised")
 		assert.EqualValues(t, iteration, renewalsDone, "number of renewals done")
 
@@ -301,7 +301,7 @@ func Test_HttpFileURLRenewal(t *testing.T) {
 	assert.NoError(t, rErr)
 	assert.EqualValues(t, len(readBuf2), readBytes)
 
-	assert.EqualValues(t, iteration+(iteration-1), ctx.numGET, "number of GET requests")
+	assert.EqualValues(t, iteration+iteration, ctx.numGET, "number of GET requests")
 	assert.EqualValues(t, iteration-1, renewalsAdvertised, "number of renewals advertised")
 	assert.EqualValues(t, iteration, renewalsDone, "number of renewals done")
 
@@ -604,7 +604,7 @@ func fakeStorage(t *testing.T, content []byte, ctx *fakeStorageContext) *httptes
 				}
 			}
 
-			contentRangeHeader := fmt.Sprintf("%d-%d", start, end)
+			contentRangeHeader := fmt.Sprintf("%d-%d/%d", start, end, len(content))
 			w.Header().Set("content-range", contentRangeHeader)
 			w.WriteHeader(206)
 		}

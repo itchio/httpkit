@@ -276,7 +276,9 @@ func New(getURL GetURLFunc, needsRenewal NeedsRenewalFunc, settings *Settings) (
 
 		var totalBytes int64
 
-		if res.StatusCode == 206 {
+		if res.StatusCode == 200 {
+			totalBytes = res.ContentLength
+		} else if res.StatusCode == 206 {
 			rangeHeader := res.Header.Get("content-range")
 			rangeTokens := strings.Split(rangeHeader, "/")
 			totalBytesStr := rangeTokens[len(rangeTokens)-1]
@@ -284,8 +286,6 @@ func New(getURL GetURLFunc, needsRenewal NeedsRenewalFunc, settings *Settings) (
 			if err != nil {
 				return nil, fmt.Errorf("Could not parse file size: %s", err.Error())
 			}
-		} else if res.StatusCode == 200 {
-			totalBytes = res.ContentLength
 		}
 
 		hf := &HTTPFile{
