@@ -274,12 +274,18 @@ func New(getURL GetURLFunc, needsRenewal NeedsRenewalFunc, settings *Settings) (
 			return nil, fmt.Errorf("Expected HTTP 206, got HTTP %d, not retrying", res.StatusCode)
 		}
 
-		rangeHeader := res.Header.Get("content-range")
-		rangeTokens := strings.Split(rangeHeader, "/")
-		totalBytesStr := rangeTokens[len(rangeTokens)-1]
-		totalBytes, err := strconv.ParseInt(totalBytesStr, 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("Could not parse file size: %s", err.Error())
+		var totalBytes int64
+
+		if res.StatusCode == 206 {
+			rangeHeader := res.Header.Get("content-range")
+			rangeTokens := strings.Split(rangeHeader, "/")
+			totalBytesStr := rangeTokens[len(rangeTokens)-1]
+			totalBytes, err = strconv.ParseInt(totalBytesStr, 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("Could not parse file size: %s", err.Error())
+			}
+		} else if res.StatusCode == 200 {
+			totalBytes = res.ContentLength
 		}
 
 		hf := &HTTPFile{
