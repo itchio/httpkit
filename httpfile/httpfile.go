@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/go-errors/errors"
@@ -518,7 +519,7 @@ func shouldRetry(err error) bool {
 	if errors.Is(err, io.ErrUnexpectedEOF) {
 		return true
 	} else if opError, ok := err.(*net.OpError); ok {
-		if opError.Timeout() || opError.Temporary() {
+		if opError.Timeout() || opError.Temporary() || opError.Err.Error() == syscall.ECONNRESET.Error() {
 			return true
 		}
 	} else if urlError, ok := err.(*url.Error); ok {
