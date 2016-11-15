@@ -198,11 +198,15 @@ func (hr *httpReader) Connect() error {
 }
 
 func (hr *httpReader) Close() error {
-	err := hr.body.Close()
+	if hr.body != nil {
+		err := hr.body.Close()
+		hr.body = nil
 
-	if err != nil {
-		return err
+		if err != nil {
+			return err
+		}
 	}
+
 	return nil
 }
 
