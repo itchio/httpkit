@@ -182,12 +182,18 @@ func (hr *httpReader) Connect() error {
 	urlStr := hf.getCurrentURL()
 
 	retryCtx := hf.newRetryContext()
+	renewalTries := 5
 
 	for retryCtx.ShouldTry() {
 		hf.log("Connect: trying url...")
 		err := tryURL(urlStr)
 		if err != nil {
 			if _, ok := err.(*NeedsRenewalError); ok {
+				renewalTries--
+				if renewalTries <= 0 {
+					return fmt.Errorf("Giving up after many renewals. Try again later or contact support.")
+				}
+
 				hf.log("Connect: got renew: %s", err.Error())
 				renewRetryCtx := hf.newRetryContext()
 
