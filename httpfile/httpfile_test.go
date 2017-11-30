@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alecthomas/assert"
 	"github.com/go-errors/errors"
 	"github.com/itchio/httpkit/retrycontext"
+	"github.com/stretchr/testify/assert"
 )
 
 type itchfs struct {
@@ -332,12 +332,21 @@ func getBigFakeData() []byte {
 }
 
 func Test_HttpFileSequentialReads(t *testing.T) {
+	testSequentialReads(t, false)
+}
+
+func Test_HttpFileSequentialReadsWithBacktracking(t *testing.T) {
+	testSequentialReads(t, true)
+}
+
+func testSequentialReads(t *testing.T, backtracking bool) {
 	fakeData := getBigFakeData()
 
 	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{})
 	defer storageServer.CloseClientConnections()
 
 	hf, err := newSimple(storageServer.URL)
+	hf.ForbidBacktracking = !backtracking
 	assert.NoError(t, err)
 
 	hf.ReaderStaleThreshold = time.Millisecond * time.Duration(100)
@@ -363,42 +372,48 @@ func Test_HttpFileSequentialReads(t *testing.T) {
 		offset += int64(readBytes)
 	}
 
-	assert.Equal(t, 1, hf.NumReaders())
+	expectedNumReaders := 1
+	assert.Equal(t, expectedNumReaders, hf.NumReaders())
 
-	// forcing to provision a new reader
+	// forcing to provision a new reader (except if backtracking)
 	readBytes, err := hf.ReadAt(readBuf, 0)
 	assert.NoError(t, err)
 	assert.Equal(t, len(readBuf), readBytes)
 
-	assert.Equal(t, 2, hf.NumReaders())
+	if !backtracking {
+		expectedNumReaders += 1
+	}
+
+	assert.Equal(t, expectedNumReaders, hf.NumReaders())
 
 	// re-using the first one
 	readBytes, err = hf.ReadAt(readBuf, sequentialReadStop+int64(len(readBuf)))
 	assert.NoError(t, err)
 	assert.Equal(t, len(readBuf), readBytes)
 
-	assert.Equal(t, 2, hf.NumReaders())
+	assert.Equal(t, expectedNumReaders, hf.NumReaders())
 
 	// forcing a third one
 	readBytes, err = hf.ReadAt(readBuf, int64(len(fakeData))-int64(len(readBuf)))
 	assert.NoError(t, err)
 	assert.Equal(t, len(readBuf), readBytes)
 
-	assert.Equal(t, 3, hf.NumReaders())
+	expectedNumReaders += 1
+	assert.Equal(t, expectedNumReaders, hf.NumReaders())
 
 	// re-using second one
 	readBytes, err = hf.ReadAt(readBuf, int64(len(readBuf)))
 	assert.NoError(t, err)
 	assert.Equal(t, len(readBuf), readBytes)
 
-	assert.Equal(t, 3, hf.NumReaders())
+	assert.Equal(t, expectedNumReaders, hf.NumReaders())
 
 	// and again, skipping a few
 	readBytes, err = hf.ReadAt(readBuf, int64(len(readBuf)*3))
 	assert.NoError(t, err)
 	assert.Equal(t, len(readBuf), readBytes)
 
-	assert.Equal(t, 3, hf.NumReaders())
+	assert.Equal(t, expectedNumReaders, hf.NumReaders())
 
 	// wait for readers to become stale
 	time.Sleep(time.Millisecond * time.Duration(200))
@@ -407,7 +422,9 @@ func Test_HttpFileSequentialReads(t *testing.T) {
 	readBytes, err = hf.ReadAt(readBuf, 0)
 	assert.NoError(t, err)
 	assert.Equal(t, len(readBuf), readBytes)
-	assert.Equal(t, 1, hf.NumReaders())
+
+	expectedNumReaders = 1
+	assert.Equal(t, expectedNumReaders, hf.NumReaders())
 
 	err = hf.Close()
 	assert.NoError(t, err)
@@ -614,6 +631,8 @@ func fakeStorage(t *testing.T, content []byte, ctx *fakeStorageContext) *httptes
 		if err != nil {
 			if strings.Contains(err.Error(), "broken pipe") {
 				// ignore
+			} else if strings.Contains(err.Error(), "forcibly closed by the remote host") {
+				// ignore
 			} else if strings.Contains(err.Error(), "protocol wrong type for socket") {
 				// ignore
 			} else {
@@ -621,8 +640,6 @@ func fakeStorage(t *testing.T, content []byte, ctx *fakeStorageContext) *httptes
 				return
 			}
 		}
-
-		return
 	}))
 
 	return server

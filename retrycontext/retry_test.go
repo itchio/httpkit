@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/alecthomas/assert"
 	"github.com/itchio/httpkit/retrycontext"
+	"github.com/stretchr/testify/assert"
 )
 
 func Test_Retry(t *testing.T) {
