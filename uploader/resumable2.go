@@ -35,9 +35,9 @@ type rblock struct {
 
 const rblockSize = 256 * 1024
 
-var _ io.WriteCloser = (*resumableUpload2)(nil)
+var _ ResumableUpload2 = (*resumableUpload2)(nil)
 
-func NewResumableUpload2(uploadURL string) io.WriteCloser {
+func NewResumableUpload2(uploadURL string) ResumableUpload2 {
 	// 64 * 256KiB = 16MiB
 	const maxChunkGroup = 64
 
