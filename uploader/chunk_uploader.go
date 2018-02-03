@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	humanize "github.com/dustin/go-humanize"
 	"github.com/go-errors/errors"
 	"github.com/itchio/httpkit/retrycontext"
 	"github.com/itchio/wharf/counter"
@@ -18,6 +19,7 @@ type chunkUploader struct {
 	// constructor
 	uploadURL  string
 	httpClient *http.Client
+	id         int
 
 	// set later
 	progressListener ProgressListenerFunc
@@ -62,8 +64,6 @@ func (cu *chunkUploader) tryPut(buf []byte, last bool) error {
 		return errors.Wrap(err, 0)
 	}
 
-	cu.debugf("uploading chunk of %d bytes", buflen)
-
 	body := bytes.NewReader(buf)
 	countingReader := counter.NewReaderCallback(func(count int64) {
 		if cu.progressListener != nil {
@@ -89,7 +89,11 @@ func (cu *chunkUploader) tryPut(buf []byte, last bool) error {
 
 	req.Header.Set("content-range", contentRange)
 	req.ContentLength = buflen
-	cu.debugf("uploading %d-%d, last? %v, content-length set to %d", start, end, last, req.ContentLength)
+	if last {
+		cu.debugf("→ Uploading %d-%d (final slice)", start, end)
+	} else {
+		cu.debugf("→ Uploading %d-%d (more to come)", start, end)
+	}
 
 	startTime := time.Now()
 
@@ -99,16 +103,17 @@ func (cu *chunkUploader) tryPut(buf []byte, last bool) error {
 		return &netError{err, GcsUnknown}
 	}
 
-	cu.debugf("server replied in %s, with status %s", time.Since(startTime), res.Status)
+	callDuration := time.Since(startTime)
+	cu.debugf("← %s (in %s)", res.Status, callDuration)
 
 	status := interpretGcsStatusCode(res.StatusCode)
 	if status == GcsUploadComplete && last {
-		cu.debugf("upload complete!")
+		cu.debugf("✓ %s upload complete!", humanize.IBytes(uint64(cu.offset+buflen)))
 		return nil
 	}
 
 	if status == GcsNeedQuery {
-		cu.debugf("need to query upload status (HTTP %s)", res.Status)
+		cu.debugf("  → Need to query upload status (because of HTTP %s)", res.Status)
 		statusRes, err := cu.queryStatus()
 		if err != nil {
 			// this happens after we retry the query a few times
@@ -116,7 +121,7 @@ func (cu *chunkUploader) tryPut(buf []byte, last bool) error {
 		}
 
 		if statusRes.StatusCode == 308 {
-			cu.debugf("got upload status, trying to resume")
+			cu.debugf("  ← Got upload status, trying to resume")
 			res = statusRes
 			status = GcsResume
 		} else {
@@ -131,7 +136,7 @@ func (cu *chunkUploader) tryPut(buf []byte, last bool) error {
 		expectedOffset := cu.offset + buflen
 		rangeHeader := res.Header.Get("Range")
 		if rangeHeader == "" {
-			cu.debugf("commit failed (null range), retrying")
+			cu.debugf("X Commit failed (null range), retrying")
 			return &retryError{committedBytes: 0}
 		}
 
@@ -140,13 +145,14 @@ func (cu *chunkUploader) tryPut(buf []byte, last bool) error {
 			return err
 		}
 
-		cu.debugf("got resume, expectedOffset: %d, committedRange: %s", expectedOffset, committedRange)
 		if committedRange.start != 0 {
 			return fmt.Errorf("upload failed: beginning not committed somehow (committed range: %s)", committedRange)
 		}
 
+		perSec := humanize.IBytes(uint64(float64(committedRange.end) / callDuration.Seconds()))
+
 		if committedRange.end == expectedOffset {
-			cu.debugf("commit succeeded (%d blocks stored)", buflen/gcsChunkSize)
+			cu.debugf("✓ Commit succeeded (%d blocks stored @ %s / s)", buflen/gcsChunkSize, perSec)
 			return nil
 		}
 
@@ -156,11 +162,11 @@ func (cu *chunkUploader) tryPut(buf []byte, last bool) error {
 		}
 
 		if committedBytes > 0 {
-			cu.debugf("commit partially succeeded (committed %d / %d byte, %d blocks)", committedBytes, buflen, committedBytes/gcsChunkSize)
+			cu.debugf("✓ Commit partially succeeded (%d / %d byte, %d blocks stored @ %s / s)", committedBytes, buflen, committedBytes/gcsChunkSize, perSec)
 			return &retryError{committedBytes}
 		}
 
-		cu.debugf("commit failed (retrying %d blocks)", buflen/gcsChunkSize)
+		cu.debugf("X Commit failed (retrying %d blocks)", buflen/gcsChunkSize)
 		return &retryError{committedBytes}
 	}
 
@@ -168,8 +174,6 @@ func (cu *chunkUploader) tryPut(buf []byte, last bool) error {
 }
 
 func (cu *chunkUploader) queryStatus() (*http.Response, error) {
-	cu.debugf("querying upload status...")
-
 	retryCtx := cu.newRetryContext()
 	for retryCtx.ShouldTry() {
 		res, err := cu.tryQueryStatus()
@@ -212,7 +216,8 @@ func (cu *chunkUploader) tryQueryStatus() (*http.Response, error) {
 
 func (cu *chunkUploader) debugf(msg string, args ...interface{}) {
 	if cu.consumer != nil {
-		cu.consumer.Debugf(msg, args...)
+		fmsg := fmt.Sprintf(msg, args...)
+		cu.consumer.Debugf("[cu-%d] %s", cu.id, fmsg)
 	}
 }
 

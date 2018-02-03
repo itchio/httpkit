@@ -2,6 +2,7 @@ package uploader
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 
 	"github.com/go-errors/errors"
@@ -15,11 +16,12 @@ type resumableUpload2 struct {
 	progressListener ProgressListenerFunc
 
 	err           error
-	splitBuf      bytes.Buffer
+	splitBuf      *bytes.Buffer
 	blocks        chan *rblock
 	done          chan struct{}
 	cancel        chan struct{}
 	chunkUploader *chunkUploader
+	id            int
 }
 
 type ResumableUpload2 interface {
@@ -35,25 +37,32 @@ type rblock struct {
 
 const rblockSize = 256 * 1024
 
+var ru2Seed = 0
+
 var _ ResumableUpload2 = (*resumableUpload2)(nil)
 
 func NewResumableUpload2(uploadURL string) ResumableUpload2 {
 	// 64 * 256KiB = 16MiB
 	const maxChunkGroup = 64
 
+	id := ru2Seed
+	ru2Seed++
 	chunkUploader := &chunkUploader{
 		uploadURL:  uploadURL,
 		httpClient: timeout.NewClient(resumableConnectTimeout, resumableIdleTimeout),
+		id:         id,
 	}
 
 	ru := &resumableUpload2{
 		maxChunkGroup: maxChunkGroup,
 
 		err:           nil,
+		splitBuf:      new(bytes.Buffer),
 		blocks:        make(chan *rblock, maxChunkGroup),
 		done:          make(chan struct{}),
 		cancel:        make(chan struct{}),
 		chunkUploader: chunkUploader,
+		id:            id,
 	}
 	ru.splitBuf.Grow(rblockSize)
 
@@ -77,10 +86,9 @@ func (ru *resumableUpload2) Write(buf []byte) (int, error) {
 
 		if availWrite == 0 {
 			// flush!
+			data := sb.Bytes()
 			ru.blocks <- &rblock{
-				// clone slice
-				data: append([]byte{}, sb.Bytes()...),
-				last: false,
+				data: append([]byte{}, data...),
 			}
 			sb.Reset()
 			availWrite = sb.Cap()
@@ -92,13 +100,8 @@ func (ru *resumableUpload2) Write(buf []byte) (int, error) {
 		}
 
 		// buffer!
-		bufferedSize, err := sb.Write(buf[written : written+copySize])
-		written += bufferedSize
-		if err != nil {
-			ru.err = err
-			close(ru.cancel)
-			return written, ru.err
-		}
+		sb.Write(buf[written : written+copySize])
+		written += copySize
 	}
 
 	return written, nil
@@ -111,9 +114,9 @@ func (ru *resumableUpload2) Close() error {
 	}
 
 	// flush!
+	data := ru.splitBuf.Bytes()
 	ru.blocks <- &rblock{
-		data: ru.splitBuf.Bytes(),
-		last: true,
+		data: append([]byte{}, data...),
 	}
 	close(ru.blocks)
 
@@ -148,20 +151,54 @@ func (ru *resumableUpload2) work() {
 	sendBuf.Grow(ru.maxChunkGroup * rblockSize)
 	var chunkGroupSize int
 
-scan:
+	// same as ru.blocks, but `.last` is set properly, no matter
+	// what the size is
+	annotatedBlocks := make(chan *rblock)
+	go func() {
+		var lastBlock *rblock
+		defer close(annotatedBlocks)
+
+	annotate:
+		for {
+			select {
+			case b := <-ru.blocks:
+				if b == nil {
+					// ru.blocks closed!
+					break annotate
+				}
+
+				// queue block
+				if lastBlock != nil {
+					annotatedBlocks <- lastBlock
+				}
+				lastBlock = b
+			case <-ru.cancel:
+				// stop everything
+				return
+			}
+		}
+
+		if lastBlock != nil {
+			lastBlock.last = true
+			annotatedBlocks <- lastBlock
+		}
+	}()
+
+aggregate:
 	for {
+		sendBuf.Reset()
 		chunkGroupSize = 0
 
-		if sendBuf.Len() == 0 {
+		{
 			// do a block receive for the first vlock
 			select {
 			case <-ru.cancel:
 				// nevermind, stop everything
 				return
-			case block := <-ru.blocks:
+			case block := <-annotatedBlocks:
 				if block == nil {
 					// done receiving blocks!
-					break scan
+					break aggregate
 				}
 
 				_, err := sendBuf.Write(block.data)
@@ -172,22 +209,23 @@ scan:
 				chunkGroupSize++
 
 				if block.last {
-					break scan
+					// done receiving blocks
+					break aggregate
 				}
 			}
 		}
 
 		// see if we can't gather any more blocks
-	aggregate:
+	maximize:
 		for chunkGroupSize < ru.maxChunkGroup {
 			select {
 			case <-ru.cancel:
 				// nevermind, stop everything
 				return
-			case block := <-ru.blocks:
+			case block := <-annotatedBlocks:
 				if block == nil {
 					// done receiving blocks!
-					break scan
+					break aggregate
 				}
 
 				_, err := sendBuf.Write(block.data)
@@ -198,23 +236,23 @@ scan:
 				chunkGroupSize++
 
 				if block.last {
-					break scan
+					// done receiving blocks
+					break aggregate
 				}
 			default:
 				// no more blocks available right now, that's ok
-				break aggregate
+				// let's just send what we got
+				break maximize
 			}
 		}
 
-		// send non-last block
+		// send what we have so far
 		ru.debugf("Uploading %d chunks", chunkGroupSize)
-		err := ru.chunkUploader.put(sendBuf.Bytes(), true)
+		err := ru.chunkUploader.put(sendBuf.Bytes(), false)
 		if err != nil {
 			ru.err = errors.Wrap(err, 0)
 			return
 		}
-
-		sendBuf.Reset()
 	}
 
 	// send the last block
@@ -228,6 +266,7 @@ scan:
 
 func (ru *resumableUpload2) debugf(msg string, args ...interface{}) {
 	if ru.consumer != nil {
-		ru.consumer.Debugf(msg, args...)
+		fmsg := fmt.Sprintf(msg, args...)
+		ru.consumer.Debugf("[ru-%d] %s", ru.id, fmsg)
 	}
 }
