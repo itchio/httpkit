@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-errors/errors"
 	"github.com/itchio/httpkit/retrycontext"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -135,7 +135,7 @@ func Test_HttpFileNotFound(t *testing.T) {
 
 	_, err := newSimple(storageServer.URL)
 	assert.Error(t, err)
-	assert.True(t, errors.Is(err, ErrNotFound))
+	assert.True(t, errors.Cause(err) == ErrNotFound)
 }
 
 func Test_HttpFileNoRange(t *testing.T) {
