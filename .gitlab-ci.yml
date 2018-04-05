@@ -8,3 +8,10 @@ test:linux:
     - linux
   script:
     - scripts/ci.sh
+
+test:windows:
+  stage: test
+  tags:
+    - windows
+  script:
+    - scripts/ci.sh
