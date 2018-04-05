@@ -1,10 +1,10 @@
 package retrycontext_test
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/itchio/httpkit/retrycontext"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -20,7 +20,7 @@ func Test_Retry(t *testing.T) {
 		for ctx.ShouldTry() {
 			if failCount > 0 {
 				failCount -= 1
-				ctx.Retry("retrying")
+				ctx.Retry(errors.Errorf("retrying"))
 				continue
 			}
 

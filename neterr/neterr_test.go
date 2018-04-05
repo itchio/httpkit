@@ -7,6 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/itchio/httpkit/httpfile"
+	"github.com/itchio/httpkit/retrycontext"
+	"github.com/itchio/httpkit/timeout"
+
 	"github.com/itchio/httpkit/neterr"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
@@ -48,6 +52,21 @@ func Test_TcpDial(t *testing.T) {
 	t.Logf("%v", err)
 	assert.True(t, neterr.IsNetworkError(err))
 	assert.True(t, neterr.IsNetworkError(errors.WithStack(err)))
+}
+
+func Test_HttpFile(t *testing.T) {
+	_, err := httpfile.New(func() (string, error) {
+		return "http://no.example.org", nil
+	}, func(res *http.Response, body []byte) bool {
+		return false
+	}, &httpfile.Settings{
+		Client: timeout.NewClient(time.Second, time.Second),
+		RetrySettings: &retrycontext.Settings{
+			MaxTries: 2,
+		},
+	})
+	t.Logf("%+v", err)
+	assert.True(t, neterr.IsNetworkError(err))
 }
 
 func Test_UnexpectedEof(t *testing.T) {
