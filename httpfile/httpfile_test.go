@@ -47,8 +47,10 @@ func defaultSettings(t *testing.T) *Settings {
 			NoSleep:  true,
 		},
 		Log: func(msg string) {
-			t.Logf("[httpfile log] %s", msg)
+			t.Helper()
+			t.Logf(msg)
 		},
+		LogLevel: 2,
 	}
 }
 
@@ -154,13 +156,8 @@ func Test_HttpFileNoRange(t *testing.T) {
 	defer storageServer.CloseClientConnections()
 
 	hf, err := newSimple(t, storageServer.URL)
-	assert.NoError(t, err)
-
-	buf := make([]byte, 1)
-	_, err = hf.ReadAt(buf, 4)
 	assert.Error(t, err)
-
-	assert.NoError(t, hf.Close())
+	assert.Nil(t, hf)
 }
 
 func Test_HttpFile503(t *testing.T) {
@@ -277,7 +274,9 @@ func Test_HttpFileURLRenewal(t *testing.T) {
 		return false
 	}
 
-	hf, err := New(getURL, needsRenewal, defaultSettings(t))
+	settings := defaultSettings(t)
+	settings.ForbidBacktracking = true
+	hf, err := New(getURL, needsRenewal, settings)
 	assert.NoError(t, err)
 
 	assert.EqualValues(t, 1, ctx.numGET, "expected number of GET requests")
@@ -294,7 +293,7 @@ func Test_HttpFileURLRenewal(t *testing.T) {
 		assert.NoError(t, rErr)
 		assert.EqualValues(t, 1, readBytes)
 
-		assert.EqualValues(t, iteration+iteration, ctx.numGET, "number of GET requests")
+		assert.EqualValues(t, iteration+iteration-1, ctx.numGET, "number of GET requests")
 		assert.EqualValues(t, iteration-1, renewalsAdvertised, "number of renewals advertised")
 		assert.EqualValues(t, iteration, renewalsDone, "number of renewals done")
 
@@ -308,7 +307,7 @@ func Test_HttpFileURLRenewal(t *testing.T) {
 	assert.NoError(t, rErr)
 	assert.EqualValues(t, len(readBuf2), readBytes)
 
-	assert.EqualValues(t, iteration+iteration, ctx.numGET, "number of GET requests")
+	assert.EqualValues(t, iteration+iteration-1, ctx.numGET, "number of GET requests")
 	assert.EqualValues(t, iteration-1, renewalsAdvertised, "number of renewals advertised")
 	assert.EqualValues(t, iteration, renewalsDone, "number of renewals done")
 
@@ -328,13 +327,17 @@ func Test_HttpFileURLRenewal(t *testing.T) {
 
 var _bigFakeData []byte
 
+// returns 4MB's worth of random data
 func getBigFakeData() []byte {
 	if _bigFakeData == nil {
-		for i := 1; i < 5; i++ {
-			_bigFakeData = append(_bigFakeData, bytes.Repeat([]byte{byte(i * 10)}, 1*1024*1024)...)
+		src := rand.NewSource(time.Now().UnixNano())
+		prng := rand.New(src)
+		_bigFakeData = make([]byte, 4*1024*1024)
+		_, err := prng.Read(_bigFakeData)
+		if err != nil {
+			panic(err)
 		}
 	}
-
 	return _bigFakeData
 }
 
