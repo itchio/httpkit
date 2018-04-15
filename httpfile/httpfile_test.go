@@ -1,4 +1,4 @@
-package httpfile
+package httpfile_test
 
 import (
 	"bytes"
@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/itchio/httpkit/httpfile"
+
 	"github.com/itchio/httpkit/retrycontext"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
@@ -27,7 +29,7 @@ func (ifs *itchfs) Scheme() string {
 	return "itchfs"
 }
 
-func (ifs *itchfs) MakeResource(u *url.URL) (GetURLFunc, NeedsRenewalFunc, error) {
+func (ifs *itchfs) MakeResource(u *url.URL) (httpfile.GetURLFunc, httpfile.NeedsRenewalFunc, error) {
 	return ifs.GetURL, ifs.NeedsRenewal, nil
 }
 
@@ -39,8 +41,8 @@ func (ifs *itchfs) NeedsRenewal(res *http.Response, body []byte) bool {
 	return false
 }
 
-func defaultSettings(t *testing.T) *Settings {
-	return &Settings{
+func defaultSettings(t *testing.T) *httpfile.Settings {
+	return &httpfile.Settings{
 		Client: http.DefaultClient,
 		RetrySettings: &retrycontext.Settings{
 			MaxTries: 5,
@@ -68,7 +70,7 @@ func Test_OpenRemoteDownloadBuild(t *testing.T) {
 	getURL, needsRenewal, err := ifs.MakeResource(u)
 	assert.NoError(t, err)
 
-	f, err := New(getURL, needsRenewal, defaultSettings(t))
+	f, err := httpfile.New(getURL, needsRenewal, defaultSettings(t))
 	assert.NoError(t, err)
 
 	s, err := f.Stat()
@@ -92,7 +94,7 @@ func Test_OpenRemoteDownloadBuild(t *testing.T) {
 	}
 }
 
-func newSimple(t *testing.T, url string) (*HTTPFile, error) {
+func newSimple(t *testing.T, url string) (*httpfile.HTTPFile, error) {
 	getURL := func() (string, error) {
 		return url, nil
 	}
@@ -101,7 +103,7 @@ func newSimple(t *testing.T, url string) (*HTTPFile, error) {
 		return false
 	}
 
-	hf, err := New(getURL, needsRenewal, defaultSettings(t))
+	hf, err := httpfile.New(getURL, needsRenewal, defaultSettings(t))
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -144,11 +146,11 @@ func Test_HttpFileNotFound(t *testing.T) {
 
 	_, err := newSimple(t, storageServer.URL)
 	assert.Error(t, err)
-	assert.True(t, errors.Cause(err) == ErrNotFound)
+	assert.True(t, errors.Cause(err) == httpfile.ErrNotFound)
 }
 
 func Test_HttpFileNoRange(t *testing.T) {
-	fakeData := []byte("aaaabbbb")
+	fakeData := getBigFakeData()
 
 	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{
 		simulateNoRangeSupport: true,
@@ -156,8 +158,18 @@ func Test_HttpFileNoRange(t *testing.T) {
 	defer storageServer.CloseClientConnections()
 
 	hf, err := newSimple(t, storageServer.URL)
+	assert.NoError(t, err)
+
+	b := make([]byte, 4)
+	_, err = hf.ReadAt(b, 3*1024*1024)
 	assert.Error(t, err)
-	assert.Nil(t, hf)
+	if err != nil {
+		se, ok := errors.Cause(err).(*httpfile.ServerError)
+		assert.True(t, ok)
+		if ok {
+			assert.EqualValues(t, httpfile.ServerErrorCodeNoRangeSupport, se.Code)
+		}
+	}
 }
 
 func Test_HttpFile503(t *testing.T) {
@@ -276,7 +288,7 @@ func Test_HttpFileURLRenewal(t *testing.T) {
 
 	settings := defaultSettings(t)
 	settings.ForbidBacktracking = true
-	hf, err := New(getURL, needsRenewal, settings)
+	hf, err := httpfile.New(getURL, needsRenewal, settings)
 	assert.NoError(t, err)
 
 	assert.EqualValues(t, 1, ctx.numGET, "expected number of GET requests")
@@ -318,7 +330,7 @@ func Test_HttpFileURLRenewal(t *testing.T) {
 
 	ctx.requiredT = 3000
 
-	hf, err = New(getURL, needsRenewal, defaultSettings(t))
+	hf, err = httpfile.New(getURL, needsRenewal, defaultSettings(t))
 	assert.NoError(t, err)
 
 	assert.EqualValues(t, 1, renewalsAdvertised, "number of renewals advertised")
