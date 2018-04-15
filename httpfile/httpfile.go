@@ -104,6 +104,11 @@ type httpReader struct {
 	backtrack int
 	body      io.ReadCloser
 	reader    *bufio.Reader
+
+	header        http.Header
+	requestURL    *url.URL
+	statusCode    int
+	contentLength int64
 }
 
 // DefaultReaderStaleThreshold is the duration after which HTTPFile's readers
@@ -196,9 +201,10 @@ const (
 )
 
 type ServerError struct {
-	Host    string
-	Message string
-	Code    ServerErrorCode
+	Host       string
+	Message    string
+	Code       ServerErrorCode
+	StatusCode int
 }
 
 func (se *ServerError) Error() string {
@@ -231,16 +237,13 @@ func (hr *httpReader) Connect() error {
 		if err != nil {
 			return err
 		}
-		hf.log("Connect.tryURL: HTTP %d", res.StatusCode)
 
 		if res.StatusCode == 200 && hr.offset > 0 {
-			hf.log("Connect.tryURL: HTTP range header not supported")
 			defer res.Body.Close()
-			return &ServerError{Host: req.Host, Message: fmt.Sprintf("HTTP Range header not supported"), Code: ServerErrorCodeNoRangeSupport}
+			return errors.WithStack(&ServerError{Host: req.Host, Message: fmt.Sprintf("HTTP Range header not supported"), Code: ServerErrorCodeNoRangeSupport, StatusCode: res.StatusCode})
 		}
 
 		if res.StatusCode/100 != 2 {
-			hf.log("Connect.tryURL: HTTP non-200, reading error")
 			defer res.Body.Close()
 
 			body, err := ioutil.ReadAll(res.Body)
@@ -250,16 +253,18 @@ func (hr *httpReader) Connect() error {
 			}
 
 			if hf.needsRenewal(res, body) {
-				hf.log("Connect.tryURL: needs renewal")
 				return &NeedsRenewalError{url: urlStr}
 			}
 
-			hf.log("Connect.tryURL: no renewal")
-			return &ServerError{Host: req.Host, Message: fmt.Sprintf("HTTP %d received, body = %s", res.StatusCode, string(body))}
+			return errors.WithStack(&ServerError{Host: req.Host, Message: fmt.Sprintf("HTTP %d: %v", res.StatusCode, string(body)), StatusCode: res.StatusCode})
 		}
 
 		hr.reader = bufio.NewReaderSize(res.Body, int(maxDiscard))
 		hr.body = res.Body
+		hr.header = res.Header
+		hr.requestURL = res.Request.URL
+		hr.statusCode = res.StatusCode
+		hr.contentLength = res.ContentLength
 		return nil
 	}
 
@@ -270,7 +275,6 @@ func (hr *httpReader) Connect() error {
 
 	for retryCtx.ShouldTry() {
 		startTime := time.Now()
-		hf.log("Connect: trying url...")
 		err := tryURL(urlStr)
 		if err != nil {
 			if _, ok := err.(*NeedsRenewalError); ok {
@@ -285,7 +289,7 @@ func (hr *httpReader) Connect() error {
 					renewRetryCtx := hf.newRetryContext()
 
 					for renewRetryCtx.ShouldTry() {
-						hf.stats.renews += 1
+						hf.stats.renews++
 						urlStr, err = hf.renewURL()
 						if err != nil {
 							if hf.shouldRetry(err) {
@@ -312,14 +316,13 @@ func (hr *httpReader) Connect() error {
 				retryCtx.Retry(err)
 				continue
 			} else {
-				hf.log("Connect: got non-renew, non-retriable error: %s", err.Error())
 				return err
 			}
 		}
 
 		totalConnDuration := time.Since(startTime)
 		hf.log("Connect: connected in %s!", totalConnDuration)
-		hf.stats.connections += 1
+		hf.stats.connections++
 		hf.stats.connectionWait += totalConnDuration
 		return nil
 	}
@@ -349,6 +352,7 @@ var _ io.Closer = (*HTTPFile)(nil)
 type Settings struct {
 	Client        *http.Client
 	RetrySettings *retrycontext.Settings
+	Log           LogFunc
 }
 
 // New returns a new HTTPFile. Note that it differs from os.Open in that it does a first request
@@ -380,108 +384,51 @@ func New(getURL GetURLFunc, needsRenewal NeedsRenewalFunc, settings *Settings) (
 		ForbidBacktracking: forbidBacktracking,
 	}
 
-	renewalTries := 0
+	hf.Log = settings.Log
 
-	for retryCtx.ShouldTry() {
-		urlStr, err := getURL()
-		if err != nil {
-			// this assumes getURL does its own retrying
-			return nil, err
-		}
+	urlStr, err := getURL()
+	if err != nil {
+		// this assumes getURL does its own retrying
+		return nil, errors.WithMessage(normalizeError(err), "httpfile.New (getting URL)")
+	}
+	hf.currentURL = urlStr
 
-		// This used to be `HEAD`, but some servers (looking at you Amazon S3)
-		// didn't like it.
-		req, err := http.NewRequest("GET", urlStr, nil)
-		if err != nil {
-			// internal error
-			return nil, err
-		}
-
-		req.Header.Set("Range", "bytes=0-0")
-
-		res, err := client.Do(req)
-		if err != nil {
-			if hf.shouldRetry(err) {
-				// we can recover from some client errors
-				// (example: temporarily offline, DNS failure, etc.)
-				retryCtx.Retry(err)
-				continue
-			} else {
-				return nil, err
-			}
-		}
-
-		hf.header = res.Header
-		hf.requestURL = res.Request.URL
-
-		err = res.Body.Close()
-		if err != nil {
-			return nil, err
-		}
-
-		if res.StatusCode != 206 && res.StatusCode != 200 {
-			if res.StatusCode == 404 {
-				// no need to retry - it's not coming back
-				return nil, errors.WithStack(ErrNotFound)
-			}
-
-			body, _ := ioutil.ReadAll(res.Body)
-			if needsRenewal(res, body) {
-				// don't sleep for renewal
-				hf.log("Initial request needs renewal (HTTP %d). Good start, good start.", res.StatusCode)
-
-				renewalTries++
-				if renewalTries >= maxRenewals {
-					return nil, ErrTooManyRenewals
-				}
-				continue
-			}
-
-			if res.StatusCode == 429 || res.StatusCode/100 == 5 {
-				retryCtx.Retry(errors.Errorf("HTTP %d (retrying)", res.StatusCode))
-				continue
-			}
-
-			return nil, fmt.Errorf("Expected HTTP 206, got HTTP %d, not retrying", res.StatusCode)
-		}
-
-		var totalBytes int64
-
-		if res.StatusCode == 206 {
-			rangeHeader := res.Header.Get("content-range")
-			rangeTokens := strings.Split(rangeHeader, "/")
-			totalBytesStr := rangeTokens[len(rangeTokens)-1]
-			totalBytes, err = strconv.ParseInt(totalBytesStr, 10, 64)
-			if err != nil {
-				return nil, fmt.Errorf("Could not parse file size: %s", err.Error())
-			}
-		} else if res.StatusCode == 200 {
-			totalBytes = res.ContentLength
-		}
-
-		hf.currentURL = urlStr
-
-		// we have to use requestURL because we want the URL after
-		// redirect (for hosts like sourceforge)
-		pathTokens := strings.Split(hf.requestURL.Path, "/")
-		hf.name = pathTokens[len(pathTokens)-1]
-
-		dispHeader := res.Header.Get("content-disposition")
-		if dispHeader != "" {
-			_, mimeParams, err := mime.ParseMediaType(dispHeader)
-			if err == nil {
-				filename := mimeParams["filename"]
-				if filename != "" {
-					hf.name = filename
-				}
-			}
-		}
-
-		hf.size = totalBytes
-		return hf, nil
+	hr, err := hf.borrowReader(0)
+	if err != nil {
+		return nil, errors.WithMessage(normalizeError(err), "httpfile.New (initial request)")
 	}
 
-	return nil, errors.WithMessage(retryCtx.LastError, "httpfile new")
+	hf.requestURL = hr.requestURL
+
+	if hr.statusCode == 206 {
+		rangeHeader := hr.header.Get("content-range")
+		rangeTokens := strings.Split(rangeHeader, "/")
+		totalBytesStr := rangeTokens[len(rangeTokens)-1]
+		hf.size, err = strconv.ParseInt(totalBytesStr, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("Could not parse file size: %s", err.Error())
+		}
+	} else if hr.statusCode == 200 {
+		hf.size = hr.contentLength
+	}
+
+	// we have to use requestURL because we want the URL after
+	// redirect (for hosts like sourceforge)
+	pathTokens := strings.Split(hf.requestURL.Path, "/")
+	hf.name = pathTokens[len(pathTokens)-1]
+
+	dispHeader := hr.header.Get("content-disposition")
+	if dispHeader != "" {
+		_, mimeParams, err := mime.ParseMediaType(dispHeader)
+		if err == nil {
+			filename := mimeParams["filename"]
+			if filename != "" {
+				hf.name = filename
+			}
+		}
+	}
+
+	return hf, nil
 }
 
 func (hf *HTTPFile) newRetryContext() *retrycontext.Context {
@@ -580,7 +527,7 @@ func (hf *HTTPFile) borrowReader(offset int64) (*httpReader, error) {
 	}
 
 	// provision a new reader
-	hf.log("borrow: making fresh for offset %d", offset)
+	hf.log("Establishing connection for bytes %d-", offset)
 
 	id := generateID()
 	reader := &httpReader{
@@ -735,13 +682,39 @@ func (hf *HTTPFile) shouldRetry(err error) bool {
 	}
 
 	if neterr.IsNetworkError(err) {
-		hf.log("shouldRetry: retrying %v", err)
+		hf.log("Retrying: %v", err)
 		return true
-	} else {
-		hf.log("shouldRetry: bailing on error %v", err)
 	}
 
+	if se, ok := errors.Cause(err).(*ServerError); ok {
+		switch se.StatusCode {
+		case 429: /* Too Many Requests */
+			return true
+		case 500: /* Internal Server Error */
+			return true
+		case 502: /* Bad Gateway */
+			return true
+		case 503: /* Service Unavailable */
+			return true
+		}
+	}
+
+	hf.log("Bailing on error: %v", err)
 	return false
+}
+
+func isHTTPStatus(err error, statusCode int) bool {
+	if se, ok := errors.Cause(err).(*ServerError); ok {
+		return se.StatusCode == statusCode
+	}
+	return false
+}
+
+func normalizeError(err error) error {
+	if isHTTPStatus(err, 404) {
+		return ErrNotFound
+	}
+	return err
 }
 
 func (hf *HTTPFile) closeAllReaders() error {

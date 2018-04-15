@@ -39,12 +39,15 @@ func (ifs *itchfs) NeedsRenewal(res *http.Response, body []byte) bool {
 	return false
 }
 
-func defaultSettings() *Settings {
+func defaultSettings(t *testing.T) *Settings {
 	return &Settings{
 		Client: http.DefaultClient,
 		RetrySettings: &retrycontext.Settings{
 			MaxTries: 5,
 			NoSleep:  true,
+		},
+		Log: func(msg string) {
+			t.Logf("[httpfile log] %s", msg)
 		},
 	}
 }
@@ -63,7 +66,7 @@ func Test_OpenRemoteDownloadBuild(t *testing.T) {
 	getURL, needsRenewal, err := ifs.MakeResource(u)
 	assert.NoError(t, err)
 
-	f, err := New(getURL, needsRenewal, defaultSettings())
+	f, err := New(getURL, needsRenewal, defaultSettings(t))
 	assert.NoError(t, err)
 
 	s, err := f.Stat()
@@ -87,7 +90,7 @@ func Test_OpenRemoteDownloadBuild(t *testing.T) {
 	}
 }
 
-func newSimple(url string) (*HTTPFile, error) {
+func newSimple(t *testing.T, url string) (*HTTPFile, error) {
 	getURL := func() (string, error) {
 		return url, nil
 	}
@@ -96,7 +99,11 @@ func newSimple(url string) (*HTTPFile, error) {
 		return false
 	}
 
-	return New(getURL, needsRenewal, defaultSettings())
+	hf, err := New(getURL, needsRenewal, defaultSettings(t))
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	return hf, nil
 }
 
 func Test_HttpFile(t *testing.T) {
@@ -105,7 +112,7 @@ func Test_HttpFile(t *testing.T) {
 	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{})
 	defer storageServer.CloseClientConnections()
 
-	f, err := newSimple(storageServer.URL)
+	f, err := newSimple(t, storageServer.URL)
 	assert.NoError(t, err)
 
 	s, err := f.Stat()
@@ -133,7 +140,7 @@ func Test_HttpFileNotFound(t *testing.T) {
 	})
 	defer storageServer.CloseClientConnections()
 
-	_, err := newSimple(storageServer.URL)
+	_, err := newSimple(t, storageServer.URL)
 	assert.Error(t, err)
 	assert.True(t, errors.Cause(err) == ErrNotFound)
 }
@@ -146,7 +153,7 @@ func Test_HttpFileNoRange(t *testing.T) {
 	})
 	defer storageServer.CloseClientConnections()
 
-	hf, err := newSimple(storageServer.URL)
+	hf, err := newSimple(t, storageServer.URL)
 	assert.NoError(t, err)
 
 	buf := make([]byte, 1)
@@ -164,7 +171,7 @@ func Test_HttpFile503(t *testing.T) {
 	})
 	defer storageServer.CloseClientConnections()
 
-	_, err := newSimple(storageServer.URL)
+	_, err := newSimple(t, storageServer.URL)
 	assert.Error(t, err)
 }
 
@@ -194,7 +201,7 @@ func Test_HttpFileCodeDisruptions(t *testing.T) {
 		})
 		defer storageServer.CloseClientConnections()
 
-		_, err := newSimple(storageServer.URL)
+		_, err := newSimple(t, storageServer.URL)
 		assert.NoError(t, err)
 	}
 
@@ -209,7 +216,7 @@ func Test_HttpFileCodeDisruptions(t *testing.T) {
 		})
 		defer storageServer.CloseClientConnections()
 
-		_, err := newSimple(storageServer.URL)
+		_, err := newSimple(t, storageServer.URL)
 		assert.Error(t, err)
 	}()
 
@@ -224,7 +231,7 @@ func Test_HttpFileCodeDisruptions(t *testing.T) {
 		})
 		defer storageServer.CloseClientConnections()
 
-		_, err := newSimple(storageServer.URL)
+		_, err := newSimple(t, storageServer.URL)
 		assert.Error(t, err)
 	}()
 }
@@ -270,7 +277,7 @@ func Test_HttpFileURLRenewal(t *testing.T) {
 		return false
 	}
 
-	hf, err := New(getURL, needsRenewal, defaultSettings())
+	hf, err := New(getURL, needsRenewal, defaultSettings(t))
 	assert.NoError(t, err)
 
 	assert.EqualValues(t, 1, ctx.numGET, "expected number of GET requests")
@@ -312,7 +319,7 @@ func Test_HttpFileURLRenewal(t *testing.T) {
 
 	ctx.requiredT = 3000
 
-	hf, err = New(getURL, needsRenewal, defaultSettings())
+	hf, err = New(getURL, needsRenewal, defaultSettings(t))
 	assert.NoError(t, err)
 
 	assert.EqualValues(t, 1, renewalsAdvertised, "number of renewals advertised")
@@ -345,7 +352,7 @@ func testSequentialReads(t *testing.T, backtracking bool) {
 	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{})
 	defer storageServer.CloseClientConnections()
 
-	hf, err := newSimple(storageServer.URL)
+	hf, err := newSimple(t, storageServer.URL)
 	hf.ForbidBacktracking = !backtracking
 	assert.NoError(t, err)
 
@@ -438,7 +445,7 @@ func Test_HttpFileConcurrentReadAt(t *testing.T) {
 	})
 	defer storageServer.CloseClientConnections()
 
-	hf, err := newSimple(storageServer.URL)
+	hf, err := newSimple(t, storageServer.URL)
 	assert.NoError(t, err)
 
 	s, err := hf.Stat()
