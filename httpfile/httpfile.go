@@ -225,8 +225,8 @@ func (hf *HTTPFile) borrowReader(offset int64) (*httpReader, error) {
 			continue
 		}
 
-		diff := offset - reader.offset
-		if diff < 0 && -diff < maxDiscard && -diff <= int64(reader.cached) {
+		diff := offset - reader.Offset()
+		if diff < 0 && -diff < maxDiscard && -diff <= reader.Cached() {
 			if -diff < bestBackDiff {
 				bestBackReader = reader.id
 				bestBackDiff = -diff
@@ -247,18 +247,17 @@ func (hf *HTTPFile) borrowReader(offset int64) (*httpReader, error) {
 		delete(hf.readers, bestReader)
 
 		// clear backtrack if any
-		reader.backtrack = 0
+		reader.Backtrack(0)
 
 		// discard if needed
 		if bestDiff > 0 {
-			hf.log2("[%9d-%9d] (Borrow) %d --> %d", offset, offset, reader.offset, reader.offset+bestDiff)
+			hf.log2("[%9d-%9d] (Borrow) %d --> %d (%s)", offset, offset, reader.Offset(), reader.Offset()+bestDiff, reader.id)
 
-			_, err := reader.Discard(bestDiff)
+			err := reader.Discard(bestDiff)
 			if err != nil {
 				if hf.shouldRetry(err) {
 					hf.log2("[%9d-] (Borrow) discard failed, reconnecting", offset)
-					reader.offset = offset
-					err = reader.Connect()
+					err = reader.Connect(offset)
 					if err != nil {
 						return nil, err
 					}
@@ -276,10 +275,14 @@ func (hf *HTTPFile) borrowReader(offset int64) (*httpReader, error) {
 		reader := hf.readers[bestBackReader]
 		delete(hf.readers, bestBackReader)
 
-		hf.log2("[%9d-%9d] (Borrow) %d <-- %d", offset, offset, reader.offset-bestBackDiff, reader.offset)
+		hf.log2("[%9d-%9d] (Borrow) %d <-- %d (%s)", offset, offset, reader.Offset()-bestBackDiff, reader.Offset(), reader.id)
 
 		// backtrack as needed
-		reader.backtrack = int(bestBackDiff)
+		err := reader.Backtrack(bestBackDiff)
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+
 		return reader, nil
 	}
 
@@ -291,12 +294,9 @@ func (hf *HTTPFile) borrowReader(offset int64) (*httpReader, error) {
 		file:      hf,
 		id:        fmt.Sprintf("reader-%d", id),
 		touchedAt: time.Now(),
-		offset:    offset,
-		cache:     make([]byte, int(maxDiscard)),
-		backtrack: 0,
 	}
 
-	err := reader.Connect()
+	err := reader.Connect(offset)
 	if err != nil {
 		return nil, err
 	}
@@ -441,7 +441,7 @@ func (hf *HTTPFile) readAt(data []byte, offset int64) (int, error) {
 		if err != nil {
 			if hf.shouldRetry(err) {
 				hf.log("Got %s, retrying", err.Error())
-				err = reader.Connect()
+				err = reader.Connect(reader.Offset())
 				if err != nil {
 					return totalBytesRead, err
 				}

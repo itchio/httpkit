@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/itchio/httpkit/httpfile/backtracker"
 	"github.com/pkg/errors"
 )
 
@@ -17,13 +18,11 @@ import (
 const DefaultReaderStaleThreshold = time.Second * time.Duration(10)
 
 type httpReader struct {
+	backtracker.Backtracker
+
 	file       *HTTPFile
 	id         string
 	touchedAt  time.Time
-	offset     int64
-	cache      []byte
-	cached     int
-	backtrack  int
 	body       io.ReadCloser
 	reader     *bufio.Reader
 	currentURL string
@@ -38,154 +37,8 @@ func (hr *httpReader) Stale() bool {
 	return time.Since(hr.touchedAt) > hr.file.ReaderStaleThreshold
 }
 
-func (hr *httpReader) Read(data []byte) (int, error) {
-	if hr.backtrack > 0 {
-		// if backtrack > 0, we're reading from the cache:
-		//
-		//                   offset
-		// |...cached data...|...buffered data...|...unread data...
-		//      |            |                   |
-		//      <-backtrack->|<-----bufsize----->|
-		//      ^
-		//      position in file
-		//
-		readLen := len(data)
-		if readLen > hr.backtrack {
-			// reading from cache (copying ranges of bytes) is
-			// completely different than reading from the buffer
-			// (actual Read() calls), so if we were asked a large slice
-			// we're going to give a short read
-			//
-			// before:
-			//
-			// |...cached data...|...buffered data...|...unread data...
-			//       |           |
-			//       |<--------readLen---------->
-			//
-			// after:
-			//
-			// |...cached data...|...buffered data...|...unread data...
-			//       |           |
-			//       |<-readLen->|
-			//
-			readLen = hr.backtrack
-		}
-
-		// hr.cache has a fixed size but is not necessarily
-		// all valid data.
-		//
-		// |...cached data...|...buffered data...|...unread data...
-		//      |            |
-		//      cacheStartIndex
-		cacheStartIndex := len(hr.cache) - hr.backtrack
-
-		// |...cached data...|...buffered data...|...unread data...
-		//      |         |
-		//      |<readLen>|
-		copy(data[:readLen], hr.cache[cacheStartIndex:cacheStartIndex+readLen])
-
-		// |...cached data...|...buffered data...|...unread data...
-		//                |  |
-		//                <-->
-		//                hr.backtrack (now)
-		//
-		hr.backtrack -= readLen
-
-		hr.file.stats.cachedBytes += int64(readLen)
-		hr.file.stats.numCacheHit++
-
-		return readLen, nil
-	}
-
-	// backtrack == 0, so we're reading fresh data
-	//
-	//                   offset
-	// |...cached data...|...buffered data...|...unread data...
-	//                   |                   |
-	//                   |<-----bufsize----->|
-	//                   ^
-	//                   position in file
-	//
-	hr.touchedAt = time.Now()
-	readBytes, err := hr.reader.Read(data)
-	hr.offset += int64(readBytes)
-
-	hr.file.stats.fetchedBytes += int64(readBytes)
-	hr.file.stats.numCacheMiss++
-
-	// make room to cache the new data.
-	//
-	// before:
-	//             |xxxxxxxxxxxxx|xxxx|.......old.......|
-	//             |             |    |<---hr.cached--->|
-	//             <-thrown away->
-	//
-	// after:
-	//             |xxxx|.......old.......|.....new.....|
-	//                  |<---------hr.cached----------->|
-	//             |<-remainingOldCacheS->|<-readBytes->|
-	//
-	remainingOldCacheSize := len(hr.cache) - readBytes
-
-	// before: |xxxxxxxxxxxxx|.........old..........|
-	// after:  |xxxx|.........old..........|xxxxxxxx|
-	copy(hr.cache[:remainingOldCacheSize], hr.cache[readBytes:])
-
-	// before: |xxxx|.........old..........|xxxxxxxx|
-	// after:  |xxxx|.........old..........|..new...|
-	copy(hr.cache[remainingOldCacheSize:], data[:readBytes])
-
-	// before: |xxxx|.........old..........|..new...|
-	//                       <--------hr.cached----->
-	//
-	// after:  |xxxx|.........old..........|..new...|
-	//              <------------hr.cached---------->
-	hr.cached += readBytes
-
-	if hr.cached > len(hr.cache) {
-		// before (because cache was full):
-		//              |..........................|
-		//     <-----------hr.cached--------------->
-		// after:
-		//              |..........................|
-		//              <---------hr.cached-------->
-		hr.cached = len(hr.cache)
-	}
-
-	if err != nil {
-		return readBytes, err
-	}
-	return readBytes, nil
-}
-
-var discardBuf = make([]byte, 4096)
-
-func (hr *httpReader) Discard(n int64) (int, error) {
-	// N.B: we don't need to worry about the cache here at all
-	// because everything goes through `hr.Read`
-
-	buf := discardBuf
-	buflen := int64(len(buf))
-
-	totalDiscarded := 0
-	for n > 0 {
-		readLen := n
-		if readLen > buflen {
-			readLen = buflen
-		}
-
-		discarded, err := hr.Read(buf[:readLen])
-		totalDiscarded += discarded
-		if err != nil {
-			return totalDiscarded, err
-		}
-		n -= int64(discarded)
-	}
-	return totalDiscarded, nil
-}
-
 // *not* thread-safe, httpfile handles the locking
-func (hr *httpReader) Connect() error {
+func (hr *httpReader) Connect(offset int64) error {
 	hf := hr.file
 
 	if hr.body != nil {
@@ -204,16 +57,16 @@ func (hr *httpReader) Connect() error {
 	hf.currentURL = hf.getCurrentURL()
 	for retryCtx.ShouldTry() {
 		startTime := time.Now()
-		err := hr.tryConnect()
+		err := hr.tryConnect(offset)
 		if err != nil {
 			if _, ok := err.(*NeedsRenewalError); ok {
 				renewalTries++
 				if renewalTries >= maxRenewals {
 					return ErrTooManyRenewals
 				}
-				hf.log("[%9d-%9d] (Connect) renewing on %v", hr.offset, hr.offset, err)
+				hf.log("[%9d-%9d] (Connect) renewing on %v", offset, offset, err)
 
-				err = hr.renewURLWithRetries()
+				err = hr.renewURLWithRetries(offset)
 				if err != nil {
 					// if we reach this point, we've failed to generate
 					// a download URL a bunch of times in a row
@@ -221,7 +74,7 @@ func (hr *httpReader) Connect() error {
 				}
 				continue
 			} else if hf.shouldRetry(err) {
-				hf.log("[%9d-%9d] (Connect) retrying %v", hr.offset, hr.offset, err)
+				hf.log("[%9d-%9d] (Connect) retrying %v", offset, offset, err)
 				retryCtx.Retry(err)
 				continue
 			} else {
@@ -230,7 +83,7 @@ func (hr *httpReader) Connect() error {
 		}
 
 		totalConnDuration := time.Since(startTime)
-		hf.log("[%9d-%9d] (Connect) %s", hr.offset, hr.offset, totalConnDuration)
+		hf.log("[%9d-%9d] (Connect) %s", offset, offset, totalConnDuration)
 		hf.stats.connections++
 		hf.stats.connectionWait += totalConnDuration
 		return nil
@@ -239,7 +92,7 @@ func (hr *httpReader) Connect() error {
 	return errors.WithMessage(retryCtx.LastError, "httpfile connect")
 }
 
-func (hr *httpReader) renewURLWithRetries() error {
+func (hr *httpReader) renewURLWithRetries(offset int64) error {
 	hf := hr.file
 	renewRetryCtx := hf.newRetryContext()
 
@@ -249,11 +102,11 @@ func (hr *httpReader) renewURLWithRetries() error {
 		hr.currentURL, err = hf.renewURL()
 		if err != nil {
 			if hf.shouldRetry(err) {
-				hf.log("[%9d-%9d] (Connect) retrying %v", hr.offset, hr.offset, err)
+				hf.log("[%9d-%9d] (Connect) retrying %v", offset, offset, err)
 				renewRetryCtx.Retry(err)
 				continue
 			} else {
-				hf.log("[%9d-%9d] (Connect) bailing on %v", hr.offset, hr.offset, err)
+				hf.log("[%9d-%9d] (Connect) bailing on %v", offset, offset, err)
 				return err
 			}
 		}
@@ -263,7 +116,7 @@ func (hr *httpReader) renewURLWithRetries() error {
 	return errors.WithMessage(renewRetryCtx.LastError, "httpfile renew")
 }
 
-func (hr *httpReader) tryConnect() error {
+func (hr *httpReader) tryConnect(offset int64) error {
 	hf := hr.file
 
 	req, err := http.NewRequest("GET", hf.currentURL, nil)
@@ -271,7 +124,7 @@ func (hr *httpReader) tryConnect() error {
 		return err
 	}
 
-	byteRange := fmt.Sprintf("bytes=%d-", hr.offset)
+	byteRange := fmt.Sprintf("bytes=%d-", offset)
 	req.Header.Set("Range", byteRange)
 
 	res, err := hf.client.Do(req)
@@ -300,12 +153,13 @@ func (hr *httpReader) tryConnect() error {
 		return errors.WithStack(&ServerError{Host: req.Host, Message: fmt.Sprintf("HTTP %d: %v", res.StatusCode, string(body)), StatusCode: res.StatusCode})
 	}
 
-	hr.reader = bufio.NewReaderSize(res.Body, int(maxDiscard))
+	hr.Backtracker = backtracker.New(offset, res.Body, maxDiscard)
 	hr.body = res.Body
 	hr.header = res.Header
 	hr.requestURL = res.Request.URL
 	hr.statusCode = res.StatusCode
 	hr.contentLength = res.ContentLength
+
 	return nil
 }
 

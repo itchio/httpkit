@@ -3,7 +3,6 @@ package backtracker
 import (
 	"bufio"
 	"io"
-	"log"
 
 	"github.com/pkg/errors"
 )
@@ -31,7 +30,7 @@ func New(offset int64, upstream io.Reader, cacheSize int64) Backtracker {
 		cache:     make([]byte, cacheSize),
 		cached:    0,
 		backtrack: 0,
-		offset:    0,
+		offset:    offset,
 	}
 }
 
@@ -97,7 +96,6 @@ func (bt *backtracker) Discard(n int64) error {
 		if readlen > discardlen {
 			readlen = discardlen
 		}
-		log.Printf("discarding %d", readlen)
 
 		discarded, err := bt.Read(discardBuf[:readlen])
 		if err != nil {
@@ -105,7 +103,6 @@ func (bt *backtracker) Discard(n int64) error {
 		}
 
 		n -= int64(discarded)
-		log.Printf("%d left", n)
 	}
 	return nil
 }

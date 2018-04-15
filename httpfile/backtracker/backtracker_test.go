@@ -88,6 +88,45 @@ func Test_BackTrackerTiny(t *testing.T) {
 	assert.EqualValues(t, []byte{10, 11, 12, 13, 14, 15}, finalbuf)
 }
 
+func Test_BacktrackerNoCache(t *testing.T) {
+	var buf []byte
+	for i := 0; i < 16; i++ {
+		buf = append(buf, byte(i))
+	}
+
+	bt := backtracker.New(0, bytes.NewReader(buf), 0)
+
+	buf2, err := ioutil.ReadAll(bt)
+	assert.NoError(t, err)
+	assert.EqualValues(t, buf, buf2)
+}
+
+func Test_BacktrackerRidiculousCache(t *testing.T) {
+	var buf []byte
+	for i := 0; i < 64; i++ {
+		buf = append(buf, byte(i))
+	}
+
+	bt := backtracker.New(17, bytes.NewReader(buf), 1*1024*1024)
+
+	bb := make([]byte, 7)
+	off := 0
+	for {
+		_, err := io.ReadFull(bt, bb)
+
+		if err == io.ErrUnexpectedEOF {
+			break
+		} else {
+			assert.NoError(t, err)
+			assert.EqualValues(t, buf[off:off+len(bb)], bb)
+		}
+
+		err = bt.Backtrack(1)
+		assert.NoError(t, err)
+		off += len(bb) - 1
+	}
+}
+
 func Test_BackTrackerLarge(t *testing.T) {
 	K := 1024
 	MB := K * K
@@ -150,4 +189,13 @@ func Test_BackTrackerLarge(t *testing.T) {
 	err = bt.Discard(int64(8 * MB))
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "EOF")
+}
+
+func Test_BacktrackerOffset(t *testing.T) {
+	bt := backtracker.New(4, bytes.NewReader([]byte{4, 5, 6, 7}), 2)
+	assert.EqualValues(t, 4, bt.Offset())
+
+	buf, err := ioutil.ReadAll(bt)
+	assert.NoError(t, err)
+	assert.EqualValues(t, []byte{4, 5, 6, 7}, buf)
 }
