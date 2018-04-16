@@ -7,6 +7,9 @@ import (
 	"github.com/pkg/errors"
 )
 
+// Backtracker allows reads from an io.Reader while remembering
+// the last N bytes of data. Backtrack() can then be called, to
+// read those bytes again.
 type Backtracker interface {
 	io.Reader
 
