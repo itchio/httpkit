@@ -55,7 +55,7 @@ func (hr *httpReader) Connect(offset int64) error {
 		startTime := time.Now()
 		err := hr.tryConnect(offset)
 		if err != nil {
-			if _, ok := err.(*NeedsRenewalError); ok {
+			if _, ok := err.(*needsRenewalError); ok {
 				renewalTries++
 				if renewalTries >= maxRenewals {
 					return ErrTooManyRenewals
@@ -142,7 +142,7 @@ func (hr *httpReader) tryConnect(offset int64) error {
 		}
 
 		if hf.needsRenewal(res, body) {
-			return &NeedsRenewalError{url: hf.currentURL}
+			return &needsRenewalError{url: hf.currentURL}
 		}
 
 		return errors.WithStack(&ServerError{Host: req.Host, Message: fmt.Sprintf("HTTP %d: %v", res.StatusCode, string(body)), StatusCode: res.StatusCode})

@@ -587,6 +587,8 @@ func (hf *HTTPFile) GetHeader() http.Header {
 	return hf.header
 }
 
+// GetRequestURL returns the first good URL httpfile
+// made a request to.
 func (hf *HTTPFile) GetRequestURL() *url.URL {
 	return hf.requestURL
 }
