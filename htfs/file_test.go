@@ -1,4 +1,4 @@
-package httpfile_test
+package htfs_test
 
 import (
 	"bytes"
@@ -14,35 +14,35 @@ import (
 	"testing"
 	"time"
 
-	"github.com/itchio/httpkit/httpfile"
+	"github.com/itchio/httpkit/htfs"
 
 	"github.com/itchio/httpkit/retrycontext"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 )
 
-type itchfs struct {
+type itchtfs struct {
 	url string
 }
 
-func (ifs *itchfs) Scheme() string {
-	return "itchfs"
+func (ifs *itchtfs) Scheme() string {
+	return "itchtfs"
 }
 
-func (ifs *itchfs) MakeResource(u *url.URL) (httpfile.GetURLFunc, httpfile.NeedsRenewalFunc, error) {
+func (ifs *itchtfs) MakeResource(u *url.URL) (htfs.GetURLFunc, htfs.NeedsRenewalFunc, error) {
 	return ifs.GetURL, ifs.NeedsRenewal, nil
 }
 
-func (ifs *itchfs) GetURL() (string, error) {
+func (ifs *itchtfs) GetURL() (string, error) {
 	return ifs.url, nil
 }
 
-func (ifs *itchfs) NeedsRenewal(res *http.Response, body []byte) bool {
+func (ifs *itchtfs) NeedsRenewal(res *http.Response, body []byte) bool {
 	return false
 }
 
-func defaultSettings(t *testing.T) *httpfile.Settings {
-	return &httpfile.Settings{
+func defaultSettings(t *testing.T) *htfs.Settings {
+	return &htfs.Settings{
 		Client: http.DefaultClient,
 		RetrySettings: &retrycontext.Settings{
 			MaxTries: 5,
@@ -62,15 +62,15 @@ func Test_OpenRemoteDownloadBuild(t *testing.T) {
 	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{})
 	defer storageServer.CloseClientConnections()
 
-	ifs := &itchfs{storageServer.URL}
+	ifs := &itchtfs{storageServer.URL}
 
-	u, err := url.Parse("itchfs:///upload/187770/download/builds/6996?api_key=foo")
+	u, err := url.Parse("itchtfs:///upload/187770/download/builds/6996?api_key=foo")
 	assert.NoError(t, err)
 
 	getURL, needsRenewal, err := ifs.MakeResource(u)
 	assert.NoError(t, err)
 
-	f, err := httpfile.New(getURL, needsRenewal, defaultSettings(t))
+	f, err := htfs.Open(getURL, needsRenewal, defaultSettings(t))
 	assert.NoError(t, err)
 
 	s, err := f.Stat()
@@ -94,7 +94,7 @@ func Test_OpenRemoteDownloadBuild(t *testing.T) {
 	}
 }
 
-func newSimple(t *testing.T, url string) (*httpfile.HTTPFile, error) {
+func newSimple(t *testing.T, url string) (*htfs.File, error) {
 	getURL := func() (string, error) {
 		return url, nil
 	}
@@ -103,14 +103,14 @@ func newSimple(t *testing.T, url string) (*httpfile.HTTPFile, error) {
 		return false
 	}
 
-	hf, err := httpfile.New(getURL, needsRenewal, defaultSettings(t))
+	hf, err := htfs.Open(getURL, needsRenewal, defaultSettings(t))
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
 	return hf, nil
 }
 
-func Test_HttpFile(t *testing.T) {
+func Test_File(t *testing.T) {
 	fakeData := []byte("aaaabbbb")
 
 	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{})
@@ -136,7 +136,7 @@ func Test_HttpFile(t *testing.T) {
 	}
 }
 
-func Test_HttpFileNotFound(t *testing.T) {
+func Test_FileNotFound(t *testing.T) {
 	fakeData := []byte("aaaabbbb")
 
 	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{
@@ -146,10 +146,10 @@ func Test_HttpFileNotFound(t *testing.T) {
 
 	_, err := newSimple(t, storageServer.URL)
 	assert.Error(t, err)
-	assert.True(t, errors.Cause(err) == httpfile.ErrNotFound)
+	assert.True(t, errors.Cause(err) == htfs.ErrNotFound)
 }
 
-func Test_HttpFileNoRange(t *testing.T) {
+func Test_FileNoRange(t *testing.T) {
 	fakeData := getBigFakeData()
 
 	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{
@@ -164,15 +164,15 @@ func Test_HttpFileNoRange(t *testing.T) {
 	_, err = hf.ReadAt(b, 3*1024*1024)
 	assert.Error(t, err)
 	if err != nil {
-		se, ok := errors.Cause(err).(*httpfile.ServerError)
+		se, ok := errors.Cause(err).(*htfs.ServerError)
 		assert.True(t, ok)
 		if ok {
-			assert.EqualValues(t, httpfile.ServerErrorCodeNoRangeSupport, se.Code)
+			assert.EqualValues(t, htfs.ServerErrorCodeNoRangeSupport, se.Code)
 		}
 	}
 }
 
-func Test_HttpFile503(t *testing.T) {
+func Test_File503(t *testing.T) {
 	fakeData := []byte("aaaabbbb")
 
 	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{
@@ -189,7 +189,7 @@ type codeDisruption struct {
 	message string
 }
 
-func Test_HttpFileCodeDisruptions(t *testing.T) {
+func Test_FileCodeDisruptions(t *testing.T) {
 	fakeData := []byte("aaaabbbb")
 
 	codeDisruptions := []codeDisruption{
@@ -245,7 +245,7 @@ func Test_HttpFileCodeDisruptions(t *testing.T) {
 	}()
 }
 
-func Test_HttpFileURLRenewal(t *testing.T) {
+func Test_FileURLRenewal(t *testing.T) {
 	fakeData := make([]byte, 16)
 
 	ctx := &fakeStorageContext{
@@ -288,7 +288,7 @@ func Test_HttpFileURLRenewal(t *testing.T) {
 
 	settings := defaultSettings(t)
 	settings.ForbidBacktracking = true
-	hf, err := httpfile.New(getURL, needsRenewal, settings)
+	hf, err := htfs.Open(getURL, needsRenewal, settings)
 	assert.NoError(t, err)
 
 	assert.EqualValues(t, 1, ctx.numGET, "expected number of GET requests")
@@ -330,7 +330,7 @@ func Test_HttpFileURLRenewal(t *testing.T) {
 
 	ctx.requiredT = 3000
 
-	hf, err = httpfile.New(getURL, needsRenewal, defaultSettings(t))
+	hf, err = htfs.Open(getURL, needsRenewal, defaultSettings(t))
 	assert.NoError(t, err)
 
 	assert.EqualValues(t, 1, renewalsAdvertised, "number of renewals advertised")
@@ -353,11 +353,11 @@ func getBigFakeData() []byte {
 	return _bigFakeData
 }
 
-func Test_HttpFileSequentialReads(t *testing.T) {
+func Test_FileSequentialReads(t *testing.T) {
 	testSequentialReads(t, false)
 }
 
-func Test_HttpFileSequentialReadsWithBacktracking(t *testing.T) {
+func Test_FileSequentialReadsWithBacktracking(t *testing.T) {
 	testSequentialReads(t, true)
 }
 
@@ -452,7 +452,7 @@ func testSequentialReads(t *testing.T, backtracking bool) {
 	assert.NoError(t, err)
 }
 
-func Test_HttpFileConcurrentReadAt(t *testing.T) {
+func Test_FileConcurrentReadAt(t *testing.T) {
 	fakeData := []byte("abcdefghijklmnopqrstuvwxyz")
 
 	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{

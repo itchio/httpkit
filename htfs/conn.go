@@ -1,4 +1,4 @@
-package httpfile
+package htfs
 
 import (
 	"bufio"
@@ -9,14 +9,14 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/itchio/httpkit/httpfile/backtracker"
+	"github.com/itchio/httpkit/htfs/backtracker"
 	"github.com/pkg/errors"
 )
 
-type httpReader struct {
+type conn struct {
 	backtracker.Backtracker
 
-	file       *HTTPFile
+	file       *File
 	id         string
 	touchedAt  time.Time
 	body       io.ReadCloser
@@ -29,12 +29,12 @@ type httpReader struct {
 	contentLength int64
 }
 
-func (hr *httpReader) Stale() bool {
+func (hr *conn) Stale() bool {
 	return time.Since(hr.touchedAt) > hr.file.ReaderStaleThreshold
 }
 
-// *not* thread-safe, httpfile handles the locking
-func (hr *httpReader) Connect(offset int64) error {
+// *not* thread-safe, File handles the locking
+func (hr *conn) Connect(offset int64) error {
 	hf := hr.file
 
 	if hr.body != nil {
@@ -85,10 +85,10 @@ func (hr *httpReader) Connect(offset int64) error {
 		return nil
 	}
 
-	return errors.WithMessage(retryCtx.LastError, "httpfile connect")
+	return errors.WithMessage(retryCtx.LastError, "htfs connect")
 }
 
-func (hr *httpReader) renewURLWithRetries(offset int64) error {
+func (hr *conn) renewURLWithRetries(offset int64) error {
 	hf := hr.file
 	renewRetryCtx := hf.newRetryContext()
 
@@ -109,10 +109,10 @@ func (hr *httpReader) renewURLWithRetries(offset int64) error {
 
 		return nil
 	}
-	return errors.WithMessage(renewRetryCtx.LastError, "httpfile renew")
+	return errors.WithMessage(renewRetryCtx.LastError, "htfs renew")
 }
 
-func (hr *httpReader) tryConnect(offset int64) error {
+func (hr *conn) tryConnect(offset int64) error {
 	hf := hr.file
 
 	req, err := http.NewRequest("GET", hf.currentURL, nil)
@@ -158,7 +158,7 @@ func (hr *httpReader) tryConnect(offset int64) error {
 	return nil
 }
 
-func (hr *httpReader) Close() error {
+func (hr *conn) Close() error {
 	if hr.body != nil {
 		err := hr.body.Close()
 		hr.body = nil

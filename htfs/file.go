@@ -1,4 +1,4 @@
-package httpfile
+package htfs
 
 import (
 	"fmt"
@@ -22,8 +22,8 @@ import (
 	"github.com/pkg/errors"
 )
 
-var forbidBacktracking = os.Getenv("HTTPFILE_NO_BACKTRACK") == "1"
-var dumpStats = os.Getenv("HTTPFILE_DUMP_STATS") == "1"
+var forbidBacktracking = os.Getenv("HFS_NO_BACKTRACK") == "1"
+var dumpStats = os.Getenv("HFS_DUMP_STATS") == "1"
 
 // A GetURLFunc returns a URL we can download the resource from.
 // It's handy to have this as a function rather than a constant for signed expiring URLs
@@ -63,9 +63,9 @@ type hstats struct {
 var idSeed int64 = 1
 var idMutex sync.Mutex
 
-// HTTPFile allows accessing a file served by an HTTP server as if it was local
+// File allows accessing a file served by an HTTP server as if it was local
 // (for random-access reading purposes, not writing)
-type HTTPFile struct {
+type File struct {
 	getURL        GetURLFunc
 	needsRenewal  NeedsRenewalFunc
 	client        *http.Client
@@ -82,7 +82,7 @@ type HTTPFile struct {
 
 	closed bool
 
-	readers map[string]*httpReader
+	readers map[string]*conn
 	lock    sync.Mutex
 
 	currentURL string
@@ -97,16 +97,16 @@ type HTTPFile struct {
 
 const defaultLogLevel = 1
 
-// defaultReaderStaleThreshold is the duration after which HTTPFile's readers
+// defaultReaderStaleThreshold is the duration after which File's readers
 // are considered stale, and are closed instead of reused. It's set to 10 seconds.
 const defaultReaderStaleThreshold = time.Second * time.Duration(10)
 
-var _ io.Seeker = (*HTTPFile)(nil)
-var _ io.Reader = (*HTTPFile)(nil)
-var _ io.ReaderAt = (*HTTPFile)(nil)
-var _ io.Closer = (*HTTPFile)(nil)
+var _ io.Seeker = (*File)(nil)
+var _ io.Reader = (*File)(nil)
+var _ io.ReaderAt = (*File)(nil)
+var _ io.Closer = (*File)(nil)
 
-// Settings allows passing additional settings to an HTTPFile
+// Settings allows passing additional settings to an File
 type Settings struct {
 	Client             *http.Client
 	RetrySettings      *retrycontext.Settings
@@ -115,9 +115,9 @@ type Settings struct {
 	ForbidBacktracking bool
 }
 
-// New returns a new HTTPFile. Note that it differs from os.Open in that it does a first request
+// Open returns a new htfs.File. Note that it differs from os.Open in that it does a first request
 // to determine the remote file's size. If that fails (after retries), an error will be returned.
-func New(getURL GetURLFunc, needsRenewal NeedsRenewalFunc, settings *Settings) (*HTTPFile, error) {
+func Open(getURL GetURLFunc, needsRenewal NeedsRenewalFunc, settings *Settings) (*File, error) {
 	client := settings.Client
 	if client == nil {
 		client = http.DefaultClient
@@ -128,14 +128,14 @@ func New(getURL GetURLFunc, needsRenewal NeedsRenewalFunc, settings *Settings) (
 		retryCtx.Settings = *settings.RetrySettings
 	}
 
-	hf := &HTTPFile{
+	hf := &File{
 		getURL:        getURL,
 		retrySettings: &retryCtx.Settings,
 		needsRenewal:  needsRenewal,
 		client:        client,
 		name:          "<remote file>",
 
-		readers: make(map[string]*httpReader),
+		readers: make(map[string]*conn),
 		stats:   &hstats{},
 
 		ReaderStaleThreshold: defaultReaderStaleThreshold,
@@ -153,13 +153,13 @@ func New(getURL GetURLFunc, needsRenewal NeedsRenewalFunc, settings *Settings) (
 
 	urlStr, err := getURL()
 	if err != nil {
-		return nil, errors.WithMessage(normalizeError(err), "httpfile.New (getting URL)")
+		return nil, errors.WithMessage(normalizeError(err), "htfs.Open (getting URL)")
 	}
 	hf.currentURL = urlStr
 
 	hr, err := hf.borrowReader(0)
 	if err != nil {
-		return nil, errors.WithMessage(normalizeError(err), "httpfile.New (initial request)")
+		return nil, errors.WithMessage(normalizeError(err), "htfs.Open (initial request)")
 	}
 	hf.returnReader(hr)
 
@@ -196,7 +196,7 @@ func New(getURL GetURLFunc, needsRenewal NeedsRenewalFunc, settings *Settings) (
 	return hf, nil
 }
 
-func (hf *HTTPFile) newRetryContext() *retrycontext.Context {
+func (hf *File) newRetryContext() *retrycontext.Context {
 	retryCtx := retrycontext.NewDefault()
 	if hf.retrySettings != nil {
 		retryCtx.Settings = *hf.retrySettings
@@ -204,16 +204,16 @@ func (hf *HTTPFile) newRetryContext() *retrycontext.Context {
 	return retryCtx
 }
 
-// NumReaders returns the number of connections currently used by the httpfile
+// NumReaders returns the number of connections currently used by the File
 // to serve ReadAt calls
-func (hf *HTTPFile) NumReaders() int {
+func (hf *File) NumReaders() int {
 	hf.lock.Lock()
 	defer hf.lock.Unlock()
 
 	return len(hf.readers)
 }
 
-func (hf *HTTPFile) borrowReader(offset int64) (*httpReader, error) {
+func (hf *File) borrowReader(offset int64) (*conn, error) {
 	if hf.size > 0 && offset >= hf.size {
 		return nil, io.EOF
 	}
@@ -300,7 +300,7 @@ func (hf *HTTPFile) borrowReader(offset int64) (*httpReader, error) {
 	hf.log("[%9d-%9d] (Borrow) new connection", offset, offset)
 
 	id := generateID()
-	reader := &httpReader{
+	reader := &conn{
 		file:      hf,
 		id:        fmt.Sprintf("reader-%d", id),
 		touchedAt: time.Now(),
@@ -314,21 +314,21 @@ func (hf *HTTPFile) borrowReader(offset int64) (*httpReader, error) {
 	return reader, nil
 }
 
-func (hf *HTTPFile) returnReader(reader *httpReader) {
+func (hf *File) returnReader(reader *conn) {
 	// TODO: enforce max idle readers ?
 
 	reader.touchedAt = time.Now()
 	hf.readers[reader.id] = reader
 }
 
-func (hf *HTTPFile) getCurrentURL() string {
+func (hf *File) getCurrentURL() string {
 	hf.urlMutex.Lock()
 	defer hf.urlMutex.Unlock()
 
 	return hf.currentURL
 }
 
-func (hf *HTTPFile) renewURL() (string, error) {
+func (hf *File) renewURL() (string, error) {
 	hf.urlMutex.Lock()
 	defer hf.urlMutex.Unlock()
 
@@ -343,15 +343,15 @@ func (hf *HTTPFile) renewURL() (string, error) {
 
 // Stat returns an os.FileInfo for this particular file. Only the Size()
 // method is useful, the rest is default values.
-func (hf *HTTPFile) Stat() (os.FileInfo, error) {
-	return &httpFileInfo{hf}, nil
+func (hf *File) Stat() (os.FileInfo, error) {
+	return &FileInfo{hf}, nil
 }
 
 // Seek the read head within the file - it's instant and never returns an
 // error, except if whence is one of os.SEEK_SET, os.SEEK_END, or os.SEEK_CUR.
 // If an invalid offset is given, it will be truncated to a valid one, between
 // [0,size).
-func (hf *HTTPFile) Seek(offset int64, whence int) (int64, error) {
+func (hf *File) Seek(offset int64, whence int) (int64, error) {
 	hf.lock.Lock()
 	defer hf.lock.Unlock()
 
@@ -380,7 +380,7 @@ func (hf *HTTPFile) Seek(offset int64, whence int) (int64, error) {
 	return hf.offset, nil
 }
 
-func (hf *HTTPFile) Read(buf []byte) (int, error) {
+func (hf *File) Read(buf []byte) (int, error) {
 	hf.lock.Lock()
 	defer hf.lock.Unlock()
 
@@ -401,7 +401,7 @@ func (hf *HTTPFile) Read(buf []byte) (int, error) {
 // It returns the number of bytes read, and an error. In case of temporary
 // network errors or timeouts, it will retry with truncated exponential backoff
 // according to RetrySettings
-func (hf *HTTPFile) ReadAt(buf []byte, offset int64) (int, error) {
+func (hf *File) ReadAt(buf []byte, offset int64) (int, error) {
 	hf.lock.Lock()
 	defer hf.lock.Unlock()
 
@@ -428,7 +428,7 @@ func (hf *HTTPFile) ReadAt(buf []byte, offset int64) (int, error) {
 	return bytesRead, err
 }
 
-func (hf *HTTPFile) readAt(data []byte, offset int64) (int, error) {
+func (hf *File) readAt(data []byte, offset int64) (int, error) {
 	buflen := len(data)
 	if buflen == 0 {
 		return 0, nil
@@ -464,7 +464,7 @@ func (hf *HTTPFile) readAt(data []byte, offset int64) (int, error) {
 	return totalBytesRead, nil
 }
 
-func (hf *HTTPFile) shouldRetry(err error) bool {
+func (hf *File) shouldRetry(err error) bool {
 	if errors.Cause(err) == io.EOF {
 		// don't retry EOF, it's a perfectly expected error
 		return false
@@ -506,7 +506,7 @@ func normalizeError(err error) error {
 	return err
 }
 
-func (hf *HTTPFile) closeAllReaders() error {
+func (hf *File) closeAllReaders() error {
 	for id, reader := range hf.readers {
 		err := reader.Close()
 		if err != nil {
@@ -519,8 +519,8 @@ func (hf *HTTPFile) closeAllReaders() error {
 	return nil
 }
 
-// Close closes all connections to the distant http server used by this HTTPFile
-func (hf *HTTPFile) Close() error {
+// Close closes all connections to the distant http server used by this File
+func (hf *File) Close() error {
 	hf.lock.Lock()
 	defer hf.lock.Unlock()
 
@@ -529,7 +529,7 @@ func (hf *HTTPFile) Close() error {
 	}
 
 	if dumpStats {
-		log.Printf("========= HTTPFile stats ==============")
+		log.Printf("========= File stats ==============")
 		log.Printf("= total connections: %d", hf.stats.connections)
 		log.Printf("= total renews: %d", hf.stats.renews)
 		log.Printf("= time spent connecting: %s", hf.stats.connectionWait)
@@ -560,7 +560,7 @@ func (hf *HTTPFile) Close() error {
 	return nil
 }
 
-func (hf *HTTPFile) log(format string, args ...interface{}) {
+func (hf *File) log(format string, args ...interface{}) {
 	if hf.Log == nil {
 		return
 	}
@@ -568,7 +568,7 @@ func (hf *HTTPFile) log(format string, args ...interface{}) {
 	hf.Log(fmt.Sprintf(format, args...))
 }
 
-func (hf *HTTPFile) log2(format string, args ...interface{}) {
+func (hf *File) log2(format string, args ...interface{}) {
 	if hf.LogLevel < 2 {
 		return
 	}
@@ -583,13 +583,13 @@ func (hf *HTTPFile) log2(format string, args ...interface{}) {
 // GetHeader returns the header the server responded
 // with on our initial request. It may contain checksums
 // which could be used for integrity checking.
-func (hf *HTTPFile) GetHeader() http.Header {
+func (hf *File) GetHeader() http.Header {
 	return hf.header
 }
 
-// GetRequestURL returns the first good URL httpfile
+// GetRequestURL returns the first good URL File
 // made a request to.
-func (hf *HTTPFile) GetRequestURL() *url.URL {
+func (hf *File) GetRequestURL() *url.URL {
 	return hf.requestURL
 }
 

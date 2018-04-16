@@ -1,4 +1,4 @@
-package httpfile
+package htfs
 
 import "fmt"
 
@@ -11,7 +11,7 @@ func (nre *needsRenewalError) Error() string {
 }
 
 // ServerErrorCode represents an error condition where
-// some server does not support httpfile - perhapsb ecause
+// some server does not support htfs - perhaps because
 // it has no range support, or because it returned a bad HTTP status code.
 type ServerErrorCode int64
 
@@ -25,7 +25,7 @@ const (
 	ServerErrorCodeNoRangeSupport
 )
 
-// ServerError represents an error httpfile has encountered
+// ServerError represents an error htfs has encountered
 // when talking to a remote server.
 type ServerError struct {
 	Host       string

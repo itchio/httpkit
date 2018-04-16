@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/itchio/httpkit/httpfile/backtracker"
+	"github.com/itchio/httpkit/htfs/backtracker"
 	"github.com/stretchr/testify/assert"
 )
 
