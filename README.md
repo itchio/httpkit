@@ -2,7 +2,7 @@
 
 ![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)
 [![build status](https://git.itch.ovh/itchio/httpkit/badges/master/build.svg)](https://git.itch.ovh/itchio/httpkit/commits/master)
-[![coverage report](https://git.itch.ovh/itchio/httpkit/badges/master/coverage.svg)](https://git.itch.ovh/itchio/httpkit/commits/master)
+[![codecov](https://codecov.io/gh/itchio/httpkit/branch/master/graph/badge.svg)](https://codecov.io/gh/itchio/httpkit)
 
 ## timeout
 
