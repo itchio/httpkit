@@ -200,6 +200,9 @@ func (hf *HTTPFile) newRetryContext() *retrycontext.Context {
 // NumReaders returns the number of connections currently used by the httpfile
 // to serve ReadAt calls
 func (hf *HTTPFile) NumReaders() int {
+	hf.lock.Lock()
+	defer hf.lock.Unlock()
+
 	return len(hf.readers)
 }
 
