@@ -143,7 +143,6 @@ func (hr *httpReader) tryConnect(offset int64) error {
 		body, err := ioutil.ReadAll(res.Body)
 		if err != nil {
 			body = []byte("could not read error body")
-			err = nil
 		}
 
 		if hf.needsRenewal(res, body) {
