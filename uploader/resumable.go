@@ -44,7 +44,7 @@ var seed = 0
 var _ ResumableUpload = (*resumableUpload)(nil)
 
 // NewResumableUpload starts a new resumable upload session
-// targetting the specified Google Cloud Storage uploadURL.
+// targeting the specified Google Cloud Storage uploadURL.
 func NewResumableUpload(uploadURL string) ResumableUpload {
 	// 64 * 256KiB = 16MiB
 	const maxChunkGroup = 64

@@ -43,6 +43,9 @@ const maxRenewals = 5
 // ErrNotFound is returned when the HTTP server returns 404 - it's not considered a temporary error
 var ErrNotFound = goerrors.New("HTTP file not found on server")
 
+// ErrTooManyRenewals is returned when we keep calling the GetURLFunc but it
+// immediately return an errors marked as renewal-related by NeedsRenewalFunc.
+// This can happen when servers are misconfigured.
 var ErrTooManyRenewals = goerrors.New("Giving up, getting too many renewals. Try again later or contact support.")
 
 type hstats struct {
@@ -92,7 +95,11 @@ type HTTPFile struct {
 	ForbidBacktracking bool
 }
 
-const DefaultLogLevel = 1
+const defaultLogLevel = 1
+
+// defaultReaderStaleThreshold is the duration after which HTTPFile's readers
+// are considered stale, and are closed instead of reused. It's set to 10 seconds.
+const defaultReaderStaleThreshold = time.Second * time.Duration(10)
 
 var _ io.Seeker = (*HTTPFile)(nil)
 var _ io.Reader = (*HTTPFile)(nil)
@@ -131,8 +138,8 @@ func New(getURL GetURLFunc, needsRenewal NeedsRenewalFunc, settings *Settings) (
 		readers: make(map[string]*httpReader),
 		stats:   &hstats{},
 
-		ReaderStaleThreshold: DefaultReaderStaleThreshold,
-		LogLevel:             DefaultLogLevel,
+		ReaderStaleThreshold: defaultReaderStaleThreshold,
+		LogLevel:             defaultLogLevel,
 		ForbidBacktracking:   forbidBacktracking,
 	}
 	hf.Log = settings.Log

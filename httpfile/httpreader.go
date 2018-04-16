@@ -13,10 +13,6 @@ import (
 	"github.com/pkg/errors"
 )
 
-// DefaultReaderStaleThreshold is the duration after which HTTPFile's readers
-// are considered stale, and are closed instead of reused. It's set to 10 seconds.
-const DefaultReaderStaleThreshold = time.Second * time.Duration(10)
-
 type httpReader struct {
 	backtracker.Backtracker
 
