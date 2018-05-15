@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -81,6 +82,7 @@ type File struct {
 	offset int64 // for io.ReadSeeker
 
 	ConnStaleThreshold time.Duration
+	MaxConns           int
 
 	closed bool
 
@@ -146,6 +148,9 @@ func Open(getURL GetURLFunc, needsRenewal NeedsRenewalFunc, settings *Settings) 
 		LogLevel:           defaultLogLevel,
 		ForbidBacktracking: forbidBacktracking,
 		DumpStats:          dumpStats,
+		// number obtained through gut feeling
+		// may not be suitable to all workloads
+		MaxConns: 8,
 	}
 	f.Log = settings.Log
 
@@ -169,7 +174,10 @@ func Open(getURL GetURLFunc, needsRenewal NeedsRenewalFunc, settings *Settings) 
 	if err != nil {
 		return nil, errors.WithMessage(normalizeError(err), "htfs.Open (initial request)")
 	}
-	f.returnConn(c)
+	err = f.returnConn(c)
+	if err != nil {
+		return nil, errors.WithMessage(normalizeError(err), "htfs.Open (initial request)")
+	}
 
 	f.requestURL = c.requestURL
 
@@ -324,12 +332,36 @@ func (f *File) borrowConn(offset int64) (*conn, error) {
 	return c, nil
 }
 
-func (f *File) returnConn(c *conn) {
+type agedConn struct {
+	id  string
+	age time.Duration
+}
+
+func (f *File) returnConn(c *conn) error {
 	f.connsLock.Lock()
 	defer f.connsLock.Unlock()
 
 	c.touchedAt = time.Now()
 	f.conns[c.id] = c
+
+	if len(f.conns)*2 > f.MaxConns*3 {
+		var agedConns []agedConn
+		for id, c := range f.conns {
+			agedConns = append(agedConns, agedConn{id: id, age: time.Since(c.touchedAt)})
+		}
+		sort.Slice(agedConns, func(i, j int) bool {
+			return agedConns[i].age < agedConns[j].age
+		})
+
+		victims := agedConns[f.MaxConns:]
+		for _, ac := range victims {
+			err := f.closeConn(f.conns[ac.id])
+			if err != nil {
+
+			}
+		}
+	}
+	return nil
 }
 
 func (f *File) getCurrentURL() string {
@@ -440,6 +472,7 @@ func (f *File) readAt(data []byte, offset int64) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	// TODO: this swallows returnConn errors
 	defer f.returnConn(c)
 
 	totalBytesRead := 0
