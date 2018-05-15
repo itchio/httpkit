@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	goerrors "errors"
@@ -56,8 +57,8 @@ type hstats struct {
 	fetchedBytes int64
 	numCacheMiss int64
 
-	cachedBytes int64
-	numCacheHit int64
+	cachedBytes  int64
+	numCacheHits int64
 }
 
 var idSeed int64 = 1
@@ -214,6 +215,9 @@ func (hf *File) NumReaders() int {
 }
 
 func (hf *File) borrowReader(offset int64) (*conn, error) {
+	hf.lock.Lock()
+	defer hf.lock.Unlock()
+
 	if hf.size > 0 && offset >= hf.size {
 		return nil, io.EOF
 	}
@@ -226,9 +230,7 @@ func (hf *File) borrowReader(offset int64) (*conn, error) {
 
 	for _, reader := range hf.readers {
 		if reader.Stale() {
-			delete(hf.readers, reader.id)
-
-			err := reader.Close()
+			err := hf.closeReader(reader)
 			if err != nil {
 				return nil, err
 			}
@@ -315,7 +317,8 @@ func (hf *File) borrowReader(offset int64) (*conn, error) {
 }
 
 func (hf *File) returnReader(reader *conn) {
-	// TODO: enforce max idle readers ?
+	hf.lock.Lock()
+	defer hf.lock.Unlock()
 
 	reader.touchedAt = time.Now()
 	hf.readers[reader.id] = reader
@@ -352,9 +355,6 @@ func (hf *File) Stat() (os.FileInfo, error) {
 // If an invalid offset is given, it will be truncated to a valid one, between
 // [0,size).
 func (hf *File) Seek(offset int64, whence int) (int64, error) {
-	hf.lock.Lock()
-	defer hf.lock.Unlock()
-
 	var newOffset int64
 
 	switch whence {
@@ -381,9 +381,6 @@ func (hf *File) Seek(offset int64, whence int) (int64, error) {
 }
 
 func (hf *File) Read(buf []byte) (int, error) {
-	hf.lock.Lock()
-	defer hf.lock.Unlock()
-
 	initialOffset := hf.offset
 	bytesRead, err := hf.readAt(buf, hf.offset)
 	hf.offset += int64(bytesRead)
@@ -402,9 +399,6 @@ func (hf *File) Read(buf []byte) (int, error) {
 // network errors or timeouts, it will retry with truncated exponential backoff
 // according to RetrySettings
 func (hf *File) ReadAt(buf []byte, offset int64) (int, error) {
-	hf.lock.Lock()
-	defer hf.lock.Unlock()
-
 	bytesRead, err := hf.readAt(buf, offset)
 
 	if hf.LogLevel >= 2 {
@@ -453,14 +447,17 @@ func (hf *File) readAt(data []byte, offset int64) (int, error) {
 				hf.log("Got %s, retrying", err.Error())
 				err = reader.Connect(reader.Offset())
 				if err != nil {
+					hf.stats.fetchedBytes += int64(totalBytesRead)
 					return totalBytesRead, err
 				}
 			} else {
+				hf.stats.fetchedBytes += int64(totalBytesRead)
 				return totalBytesRead, err
 			}
 		}
 	}
 
+	atomic.AddInt64(&hf.stats.fetchedBytes, int64(totalBytesRead))
 	return totalBytesRead, nil
 }
 
@@ -507,16 +504,25 @@ func normalizeError(err error) error {
 }
 
 func (hf *File) closeAllReaders() error {
-	for id, reader := range hf.readers {
-		err := reader.Close()
+	for _, reader := range hf.readers {
+		err := hf.closeReader(reader)
 		if err != nil {
 			return err
 		}
-
-		delete(hf.readers, id)
 	}
 
 	return nil
+}
+
+func (hf *File) closeReader(reader *conn) error {
+	delete(hf.readers, reader.id)
+
+	if dumpStats {
+		hf.stats.numCacheHits += reader.NumCacheHits()
+		hf.stats.numCacheMiss += reader.NumCacheMiss()
+		hf.stats.cachedBytes += reader.CachedBytesServed()
+	}
+	return reader.Close()
 }
 
 // Close closes all connections to the distant http server used by this File
@@ -526,6 +532,11 @@ func (hf *File) Close() error {
 
 	if hf.closed {
 		return nil
+	}
+
+	err := hf.closeAllReaders()
+	if err != nil {
+		return err
 	}
 
 	if dumpStats {
@@ -539,20 +550,19 @@ func (hf *File) Close() error {
 		if size != 0 {
 			perc = float64(hf.stats.fetchedBytes) / float64(size) * 100.0
 		}
-		allReads := hf.stats.fetchedBytes + hf.stats.cachedBytes
-		percCached = float64(hf.stats.cachedBytes) / float64(allReads) * 100.0
+		totalServedBytes := hf.stats.fetchedBytes
+		percCached = float64(hf.stats.cachedBytes) / float64(totalServedBytes) * 100.0
 
 		log.Printf("= total bytes fetched: %s / %s (%.2f%%)", humanize.IBytes(uint64(hf.stats.fetchedBytes)), humanize.IBytes(uint64(size)), perc)
 		log.Printf("= total bytes served from cache: %s (%.2f%% of all served bytes)", humanize.IBytes(uint64(hf.stats.cachedBytes)), percCached)
 
-		hitRate := float64(hf.stats.numCacheHit) / float64(hf.stats.numCacheHit+hf.stats.numCacheMiss) * 100.0
-		log.Printf("= cache hit rate: %.2f%%", hitRate)
+		totalReads := hf.stats.numCacheHits + hf.stats.numCacheMiss
+		if totalReads == 0 {
+			totalReads = -1 // avoid NaN hit rate
+		}
+		hitRate := float64(hf.stats.numCacheHits) / float64(totalReads) * 100.0
+		log.Printf("= cache hit rate: %.2f%% (out of %d reads)", hitRate, totalReads)
 		log.Printf("========================================")
-	}
-
-	err := hf.closeAllReaders()
-	if err != nil {
-		return err
 	}
 
 	hf.closed = true
