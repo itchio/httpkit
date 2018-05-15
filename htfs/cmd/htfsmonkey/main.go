@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/itchio/wharf/eos/option"
+
 	"github.com/itchio/httpkit/htfs"
 	"github.com/itchio/wharf/wrand"
 	"github.com/pkg/errors"
@@ -84,12 +86,22 @@ func main() {
 	must(doMain())
 }
 
+type delayHandler struct {
+	realHandler http.Handler
+}
+
+func (dh *delayHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	time.Sleep(time.Millisecond * time.Duration(10+rand.Intn(80)))
+	dh.realHandler.ServeHTTP(w, req)
+}
+
 func doMain() error {
 	log.Printf("Generating fake data...")
 	prng := &wrand.RandReader{
 		Source: rand.NewSource(time.Now().UnixNano()),
 	}
-	fakeData, err := ioutil.ReadAll(io.LimitReader(prng, 4*1024*1024))
+	var fakeDataSize int64 = 32 * 1024 * 1024
+	fakeData, err := ioutil.ReadAll(io.LimitReader(prng, fakeDataSize))
 	must(err)
 
 	http.Handle("/", http.FileServer(&fakeFileSystem{fakeData}))
@@ -104,7 +116,7 @@ func doMain() error {
 
 	url := fmt.Sprintf("http://%s/file.dat", l.Addr().String())
 
-	f, err := eos.Open(url)
+	f, err := eos.Open(url, option.WithHTFSDumpStats())
 	must(err)
 	defer f.Close()
 
@@ -120,19 +132,18 @@ func doMain() error {
 		actionSeekBackLittle
 		actionSeekForwardLarge
 		actionSeekBackLarge
+		actionReset
 	)
 
 	sigChan := make(chan os.Signal)
 	signal.Notify(sigChan, syscall.SIGINT)
 
 	var running int64 = 1
+	var totalReads int64
+	startTime := time.Now()
 
-	go func() {
-		<-time.After(10 * time.Second)
-		sigChan <- syscall.SIGINT
-	}()
-
-	worker := func(workerNum int) {
+	numWorkers := 4
+	work := func(workerNum int) {
 		defer func() {
 			done <- true
 		}()
@@ -151,10 +162,12 @@ func doMain() error {
 				return
 			}
 
-			if i%printInterval == 0 {
+			newTotalReads := atomic.AddInt64(&totalReads, 1)
+
+			if newTotalReads%int64(printInterval) == 0 {
 				hf := f.(*htfs.File)
-				hf.NumReaders()
-				log.Printf("[%d] %d reads... (%d conns)", workerNum, i, hf.NumReaders())
+				hf.NumConns()
+				log.Printf("%d reads... (%d workers, %d conns, running for %s)", newTotalReads, numWorkers, hf.NumConns(), time.Since(startTime))
 			}
 
 			x := source.Int63() % 100
@@ -171,6 +184,10 @@ func doMain() error {
 				action = actionSeekBackLarge
 			}
 
+			if lastOffset > int64(len(fakeData)-8*1024) {
+				action = actionReset
+			}
+
 			var offset int64
 			var readSize int64
 
@@ -182,9 +199,11 @@ func doMain() error {
 			case actionSeekBackLittle:
 				offset = lastOffset + lastN - source.Int63()%1024
 			case actionSeekForwardLarge:
-				offset = lastOffset + lastN + source.Int63()%(1024*128)
+				offset = lastOffset + lastN + source.Int63()%(fakeDataSize/4)
 			case actionSeekBackLarge:
-				offset = lastOffset + lastN - source.Int63()%(1024*128)
+				offset = lastOffset + lastN - source.Int63()%(fakeDataSize/4)
+			case actionReset:
+				offset = 0
 			}
 
 			if offset >= int64(len(fakeData)-1) {
@@ -212,9 +231,8 @@ func doMain() error {
 		}
 	}
 
-	numWorkers := 3
 	for i := 0; i < numWorkers; i++ {
-		go worker(i)
+		go work(i)
 	}
 
 	for i := 0; i < numWorkers; i++ {
