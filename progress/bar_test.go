@@ -1,10 +1,10 @@
-package pb
+package progress
 
 import "testing"
 
 func Test_Width(t *testing.T) {
 	count := 5000
-	bar := New(count)
+	bar := NewBar(int64(count))
 	width := 100
 	bar.SetWidth(100).Callback = func(out string) {
 		if len(out) != width-1 {
@@ -17,14 +17,14 @@ func Test_Width(t *testing.T) {
 }
 
 func Test_MultipleFinish(t *testing.T) {
-	bar := New(5000)
+	bar := NewBar(5000)
 	bar.Set64(7000)
 	bar.Finish()
 	bar.Finish()
 }
 
 func Test_Format(t *testing.T) {
-	bar := New(5000).Format("[ooo]")
+	bar := NewBar(5000).Format("[ooo]")
 	bar.Set64(7000)
 	bar.Finish()
 	bar.Finish()
