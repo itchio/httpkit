@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/itchio/httpkit/timeout"
 	"github.com/itchio/wharf/state"
@@ -68,7 +69,7 @@ func NewResumableUpload(uploadURL string, opts ...Option) ResumableUpload {
 		err:           nil,
 		pushedErr:     make(chan struct{}, 0),
 		splitBuf:      new(bytes.Buffer),
-		blocks:        make(chan *rblock, s.MaxChunkGroup),
+		blocks:        make(chan *rblock),
 		done:          make(chan struct{}, 0),
 		chunkUploader: chunkUploader,
 		id:            id,
@@ -169,7 +170,7 @@ func (ru *resumableUpload) work() {
 
 	// same as ru.blocks, but `.last` is set properly, no matter
 	// what the size is
-	annotatedBlocks := make(chan *rblock)
+	annotatedBlocks := make(chan *rblock, ru.maxChunkGroup)
 	go func() {
 		var lastBlock *rblock
 		defer close(annotatedBlocks)
@@ -255,7 +256,7 @@ aggregate:
 					// done receiving blocks
 					break aggregate
 				}
-			default:
+			case <-time.After(100 * time.Millisecond):
 				// no more blocks available right now, that's ok
 				// let's just send what we got
 				break maximize

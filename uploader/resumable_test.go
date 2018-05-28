@@ -44,7 +44,10 @@ func Test_ChunkUploader(t *testing.T) {
 	ref := new(bytes.Buffer)
 	mw := io.MultiWriter(ref, ru)
 
-	wtest.Must(t, fullyrandom.Write(mw, 16*1024*1024, time.Now().UnixNano()))
+	for i := 0; i < 16; i++ {
+		wtest.Must(t, fullyrandom.Write(mw, 1*1024*1024, time.Now().UnixNano()))
+		time.Sleep(500 * time.Millisecond)
+	}
 	wtest.Must(t, ru.Close())
 
 	assert.EqualValues(t, ref.Bytes(), server.state.data)
