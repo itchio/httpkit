@@ -4,6 +4,8 @@ import (
 	"io"
 	"net"
 	"net/url"
+
+	"github.com/getlantern/idletiming"
 )
 
 // IsNetworkError returns true if the error's cause is: io.ErrUnexpectedEOF,
@@ -23,6 +25,10 @@ func IsNetworkError(err error) bool {
 	}
 
 	if _, ok := err.(*net.OpError); ok {
+		return true
+	}
+
+	if err == idletiming.ErrIdled {
 		return true
 	}
 
