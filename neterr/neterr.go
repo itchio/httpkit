@@ -4,6 +4,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"strings"
 
 	"github.com/getlantern/idletiming"
 )
@@ -30,6 +31,19 @@ func IsNetworkError(err error) bool {
 
 	if err == idletiming.ErrIdled {
 		return true
+	}
+
+	{
+		// net/http's http2 errors are unexported structs, I don't know
+		// of a better way to detect this :(
+		// see net/http/h2_bundle.go
+		msg := err.Error()
+		if strings.HasPrefix(msg, "stream error: stream ID ") {
+			return true
+		}
+		if strings.HasPrefix(msg, "connection error: ") {
+			return true
+		}
 	}
 
 	if te, ok := err.(temporary); ok {
