@@ -41,8 +41,8 @@ func NewLimiter(opts LimiterOpts) Limiter {
 
 func (l *limiter) run() {
 	for {
-		l.c <- struct{}{}
 		time.Sleep(l.interval)
+		l.c <- struct{}{}
 	}
 }
 
