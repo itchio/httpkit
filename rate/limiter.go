@@ -31,9 +31,6 @@ func NewLimiter(opts LimiterOpts) Limiter {
 	}
 
 	c := make(chan struct{}, opts.Burst)
-	for i := 0; i < opts.Burst; i++ {
-		c <- struct{}{}
-	}
 	l := &limiter{
 		c:        c,
 		interval: time.Duration(1.0 / float64(opts.RequestsPerSecond) * float64(time.Second)),
