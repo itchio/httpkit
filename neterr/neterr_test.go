@@ -25,12 +25,25 @@ func Test_TcpDial(t *testing.T) {
 	assert.True(t, neterr.IsNetworkError(err))
 	assert.True(t, neterr.IsNetworkError(errors.WithStack(err)))
 
-	_, err = http.Get("http://localhost:1/hi")
+	client := &http.Client{
+		Timeout: 1 * time.Second,
+	}
+
+	get := func(url string) (*http.Response, error) {
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		return client.Do(req)
+	}
+
+	_, err = get("http://localhost:1/hi")
 	t.Logf("%v", err)
 	assert.True(t, neterr.IsNetworkError(err))
 	assert.True(t, neterr.IsNetworkError(errors.WithStack(err)))
 
-	_, err = http.Get("http://no.example.org")
+	_, err = get("http://no.example.org")
 	t.Logf("%v", err)
 	assert.True(t, neterr.IsNetworkError(err))
 	assert.True(t, neterr.IsNetworkError(errors.WithStack(err)))
@@ -38,7 +51,7 @@ func Test_TcpDial(t *testing.T) {
 	req, err := http.NewRequest("GET", "http://example.org/", nil)
 	assert.NoError(t, err)
 
-	client := &http.Client{
+	client = &http.Client{
 		Timeout: 200 * time.Millisecond,
 		Transport: &http.Transport{
 			Dial: func(network string, addr string) (net.Conn, error) {

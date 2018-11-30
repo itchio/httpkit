@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/itchio/httpkit/htfs"
+	"github.com/itchio/httpkit/neterr"
 
 	"github.com/itchio/httpkit/retrycontext"
 	"github.com/pkg/errors"
@@ -149,6 +150,28 @@ func Test_FileNotFound(t *testing.T) {
 	assert.True(t, errors.Cause(err) == htfs.ErrNotFound)
 }
 
+func Test_FileEOF(t *testing.T) {
+	fakeData := []byte("aaaabbbb")
+
+	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{
+		disruption: &storageDisruption{
+			streak: 2,
+			handler: func(w http.ResponseWriter) {
+				panic("hey let's reset the connection")
+			},
+		},
+	})
+	defer storageServer.CloseClientConnections()
+
+	_, err := newSimple(t, storageServer.URL)
+	assert.Error(t, err)
+	assert.True(t, neterr.IsNetworkError(err))
+	err = errors.Cause(err)
+	ue, ok := err.(*url.Error)
+	assert.True(t, ok)
+	assert.True(t, ue.Err == io.EOF)
+}
+
 func Test_FileNoRange(t *testing.T) {
 	fakeData := getBigFakeData()
 
@@ -163,12 +186,10 @@ func Test_FileNoRange(t *testing.T) {
 	b := make([]byte, 4)
 	_, err = hf.ReadAt(b, 3*1024*1024)
 	assert.Error(t, err)
-	if err != nil {
-		se, ok := errors.Cause(err).(*htfs.ServerError)
-		assert.True(t, ok)
-		if ok {
-			assert.EqualValues(t, htfs.ServerErrorCodeNoRangeSupport, se.Code)
-		}
+	se, ok := errors.Cause(err).(*htfs.ServerError)
+	assert.True(t, ok)
+	if ok {
+		assert.EqualValues(t, htfs.ServerErrorCodeNoRangeSupport, se.Code)
 	}
 }
 
