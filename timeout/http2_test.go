@@ -10,14 +10,15 @@ import (
 )
 
 func Test_HTTP2(t *testing.T) {
+	assert := assert.New(t)
 	c := timeout.NewDefaultClient()
 	res, err := c.Get("https://http2.pro/api/v1")
-	assert.NoError(t, err)
-	assert.EqualValues(t, 200, res.StatusCode)
+	assert.NoError(err)
+	assert.EqualValues(200, res.StatusCode)
 	defer res.Body.Close()
 
 	body, err := ioutil.ReadAll(res.Body)
-	assert.NoError(t, err)
+	assert.NoError(err)
 
 	type ApiRes struct {
 		HTTP2    int    `json:"http2"`
@@ -27,8 +28,8 @@ func Test_HTTP2(t *testing.T) {
 
 	var apiRes ApiRes
 	err = json.Unmarshal(body, &apiRes)
-	assert.NoError(t, err)
+	assert.NoError(err)
 
-	assert.EqualValues(t, 1, apiRes.HTTP2)
-	assert.EqualValues(t, "HTTP/2.0", apiRes.Protocol)
+	assert.EqualValues(1, apiRes.HTTP2)
+	assert.EqualValues("HTTP/2.0", apiRes.Protocol)
 }

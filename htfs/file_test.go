@@ -58,6 +58,7 @@ func defaultSettings(t *testing.T) *htfs.Settings {
 }
 
 func Test_OpenRemoteDownloadBuild(t *testing.T) {
+	assert := assert.New(t)
 	fakeData := []byte("aaaabbbb")
 
 	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{})
@@ -66,27 +67,27 @@ func Test_OpenRemoteDownloadBuild(t *testing.T) {
 	ifs := &itchtfs{storageServer.URL}
 
 	u, err := url.Parse("itchtfs:///upload/187770/download/builds/6996?api_key=foo")
-	assert.NoError(t, err)
+	assert.NoError(err)
 
 	getURL, needsRenewal, err := ifs.MakeResource(u)
-	assert.NoError(t, err)
+	assert.NoError(err)
 
 	f, err := htfs.Open(getURL, needsRenewal, defaultSettings(t))
-	assert.NoError(t, err)
+	assert.NoError(err)
 
 	s, err := f.Stat()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(len(fakeData)), s.Size())
+	assert.NoError(err)
+	assert.Equal(int64(len(fakeData)), s.Size())
 
 	readFakeData, err := ioutil.ReadAll(f)
-	assert.NoError(t, err)
-	assert.Equal(t, len(fakeData), len(readFakeData))
-	assert.Equal(t, fakeData, readFakeData)
+	assert.NoError(err)
+	assert.Equal(len(fakeData), len(readFakeData))
+	assert.Equal(fakeData, readFakeData)
 
 	readBytes, err := f.ReadAt(readFakeData, 0)
-	assert.NoError(t, err)
-	assert.Equal(t, len(fakeData), readBytes)
-	assert.Equal(t, fakeData, readFakeData)
+	assert.NoError(err)
+	assert.Equal(len(fakeData), readBytes)
+	assert.Equal(fakeData, readFakeData)
 
 	err = f.Close()
 	if err != nil {
@@ -112,23 +113,24 @@ func newSimple(t *testing.T, url string) (*htfs.File, error) {
 }
 
 func Test_File(t *testing.T) {
+	assert := assert.New(t)
 	fakeData := []byte("aaaabbbb")
 
 	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{})
 	defer storageServer.CloseClientConnections()
 
 	f, err := newSimple(t, storageServer.URL)
-	assert.NoError(t, err)
+	assert.NoError(err)
 
 	s, err := f.Stat()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(len(fakeData)), s.Size())
+	assert.NoError(err)
+	assert.Equal(int64(len(fakeData)), s.Size())
 
 	buf := make([]byte, 4)
 	readBytes, err := f.ReadAt(buf, 4)
-	assert.NoError(t, err)
-	assert.Equal(t, len(buf), readBytes)
-	assert.Equal(t, []byte("bbbb"), buf)
+	assert.NoError(err)
+	assert.Equal(len(buf), readBytes)
+	assert.Equal([]byte("bbbb"), buf)
 
 	err = f.Close()
 	if err != nil {
@@ -138,6 +140,7 @@ func Test_File(t *testing.T) {
 }
 
 func Test_FileNotFound(t *testing.T) {
+	assert := assert.New(t)
 	fakeData := []byte("aaaabbbb")
 
 	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{
@@ -146,11 +149,12 @@ func Test_FileNotFound(t *testing.T) {
 	defer storageServer.CloseClientConnections()
 
 	_, err := newSimple(t, storageServer.URL)
-	assert.Error(t, err)
-	assert.True(t, errors.Cause(err) == htfs.ErrNotFound)
+	assert.Error(err)
+	assert.True(errors.Cause(err) == htfs.ErrNotFound)
 }
 
 func Test_FileEOF(t *testing.T) {
+	assert := assert.New(t)
 	fakeData := []byte("aaaabbbb")
 
 	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{
@@ -164,15 +168,16 @@ func Test_FileEOF(t *testing.T) {
 	defer storageServer.CloseClientConnections()
 
 	_, err := newSimple(t, storageServer.URL)
-	assert.Error(t, err)
-	assert.True(t, neterr.IsNetworkError(err))
+	assert.Error(err)
+	assert.True(neterr.IsNetworkError(err))
 	err = errors.Cause(err)
 	ue, ok := err.(*url.Error)
-	assert.True(t, ok)
-	assert.True(t, ue.Err == io.EOF)
+	assert.True(ok)
+	assert.True(ue.Err == io.EOF)
 }
 
 func Test_FileNoRange(t *testing.T) {
+	assert := assert.New(t)
 	fakeData := getBigFakeData()
 
 	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{
@@ -181,19 +186,20 @@ func Test_FileNoRange(t *testing.T) {
 	defer storageServer.CloseClientConnections()
 
 	hf, err := newSimple(t, storageServer.URL)
-	assert.NoError(t, err)
+	assert.NoError(err)
 
 	b := make([]byte, 4)
 	_, err = hf.ReadAt(b, 3*1024*1024)
-	assert.Error(t, err)
+	assert.Error(err)
 	se, ok := errors.Cause(err).(*htfs.ServerError)
-	assert.True(t, ok)
+	assert.True(ok)
 	if ok {
-		assert.EqualValues(t, htfs.ServerErrorCodeNoRangeSupport, se.Code)
+		assert.EqualValues(htfs.ServerErrorCodeNoRangeSupport, se.Code)
 	}
 }
 
 func Test_File503(t *testing.T) {
+	assert := assert.New(t)
 	fakeData := []byte("aaaabbbb")
 
 	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{
@@ -202,7 +208,7 @@ func Test_File503(t *testing.T) {
 	defer storageServer.CloseClientConnections()
 
 	_, err := newSimple(t, storageServer.URL)
-	assert.Error(t, err)
+	assert.Error(err)
 }
 
 type codeDisruption struct {
@@ -211,6 +217,7 @@ type codeDisruption struct {
 }
 
 func Test_FileCodeDisruptions(t *testing.T) {
+	assert := assert.New(t)
 	fakeData := []byte("aaaabbbb")
 
 	codeDisruptions := []codeDisruption{
@@ -232,7 +239,7 @@ func Test_FileCodeDisruptions(t *testing.T) {
 		defer storageServer.CloseClientConnections()
 
 		_, err := newSimple(t, storageServer.URL)
-		assert.NoError(t, err)
+		assert.NoError(err)
 	}
 
 	func() {
@@ -247,7 +254,7 @@ func Test_FileCodeDisruptions(t *testing.T) {
 		defer storageServer.CloseClientConnections()
 
 		_, err := newSimple(t, storageServer.URL)
-		assert.Error(t, err)
+		assert.Error(err)
 	}()
 
 	func() {
@@ -262,11 +269,12 @@ func Test_FileCodeDisruptions(t *testing.T) {
 		defer storageServer.CloseClientConnections()
 
 		_, err := newSimple(t, storageServer.URL)
-		assert.Error(t, err)
+		assert.Error(err)
 	}()
 }
 
 func Test_FileURLRenewal(t *testing.T) {
+	assert := assert.New(t)
 	fakeData := make([]byte, 16)
 
 	ctx := &fakeStorageContext{
@@ -276,7 +284,7 @@ func Test_FileURLRenewal(t *testing.T) {
 	defer storageServer.CloseClientConnections()
 
 	serverBaseURL, err := url.Parse(storageServer.URL)
-	assert.NoError(t, err)
+	assert.NoError(err)
 
 	giveExpired := false
 	renewalsAdvertised := 0
@@ -310,11 +318,11 @@ func Test_FileURLRenewal(t *testing.T) {
 	settings := defaultSettings(t)
 	settings.ForbidBacktracking = true
 	hf, err := htfs.Open(getURL, needsRenewal, settings)
-	assert.NoError(t, err)
+	assert.NoError(err)
 
-	assert.EqualValues(t, 1, ctx.numGET, "expected number of GET requests")
-	assert.EqualValues(t, 0, renewalsAdvertised, "expected number of renewals advertised")
-	assert.EqualValues(t, 1, renewalsDone, "expected number of renewals done")
+	assert.EqualValues(1, ctx.numGET, "expected number of GET requests")
+	assert.EqualValues(0, renewalsAdvertised, "expected number of renewals advertised")
+	assert.EqualValues(1, renewalsDone, "expected number of renewals done")
 
 	readBuf := make([]byte, 1)
 
@@ -323,12 +331,12 @@ func Test_FileURLRenewal(t *testing.T) {
 	for off := int64(15); off >= 0; off-- {
 		iteration++
 		readBytes, rErr := hf.ReadAt(readBuf, off)
-		assert.NoError(t, rErr)
-		assert.EqualValues(t, 1, readBytes)
+		assert.NoError(rErr)
+		assert.EqualValues(1, readBytes)
 
-		assert.EqualValues(t, iteration+iteration-1, ctx.numGET, "number of GET requests")
-		assert.EqualValues(t, iteration-1, renewalsAdvertised, "number of renewals advertised")
-		assert.EqualValues(t, iteration, renewalsDone, "number of renewals done")
+		assert.EqualValues(iteration+iteration-1, ctx.numGET, "number of GET requests")
+		assert.EqualValues(iteration-1, renewalsAdvertised, "number of renewals advertised")
+		assert.EqualValues(iteration, renewalsDone, "number of renewals done")
 
 		ctx.requiredT++
 	}
@@ -337,12 +345,12 @@ func Test_FileURLRenewal(t *testing.T) {
 
 	readBuf2 := make([]byte, 15)
 	readBytes, rErr := hf.ReadAt(readBuf2, 1)
-	assert.NoError(t, rErr)
-	assert.EqualValues(t, len(readBuf2), readBytes)
+	assert.NoError(rErr)
+	assert.EqualValues(len(readBuf2), readBytes)
 
-	assert.EqualValues(t, iteration+iteration-1, ctx.numGET, "number of GET requests")
-	assert.EqualValues(t, iteration-1, renewalsAdvertised, "number of renewals advertised")
-	assert.EqualValues(t, iteration, renewalsDone, "number of renewals done")
+	assert.EqualValues(iteration+iteration-1, ctx.numGET, "number of GET requests")
+	assert.EqualValues(iteration-1, renewalsAdvertised, "number of renewals advertised")
+	assert.EqualValues(iteration, renewalsDone, "number of renewals done")
 
 	// now start with an expired URL
 	renewalsDone = 0
@@ -352,10 +360,10 @@ func Test_FileURLRenewal(t *testing.T) {
 	ctx.requiredT = 3000
 
 	hf, err = htfs.Open(getURL, needsRenewal, defaultSettings(t))
-	assert.NoError(t, err)
+	assert.NoError(err)
 
-	assert.EqualValues(t, 1, renewalsAdvertised, "number of renewals advertised")
-	assert.EqualValues(t, 2, renewalsDone, "number of renewals done")
+	assert.EqualValues(1, renewalsAdvertised, "number of renewals advertised")
+	assert.EqualValues(2, renewalsDone, "number of renewals done")
 }
 
 var _bigFakeData []byte
@@ -383,6 +391,7 @@ func Test_FileSequentialReadsWithBacktracking(t *testing.T) {
 }
 
 func testSequentialReads(t *testing.T, backtracking bool) {
+	assert := assert.New(t)
 	fakeData := getBigFakeData()
 
 	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{})
@@ -390,7 +399,7 @@ func testSequentialReads(t *testing.T, backtracking bool) {
 
 	hf, err := newSimple(t, storageServer.URL)
 	hf.ForbidBacktracking = !backtracking
-	assert.NoError(t, err)
+	assert.NoError(err)
 
 	hf.ConnStaleThreshold = time.Millisecond * time.Duration(100)
 
@@ -409,71 +418,72 @@ func testSequentialReads(t *testing.T, backtracking bool) {
 		}
 
 		readBytes, rErr := hf.ReadAt(readBuf, offset)
-		assert.NoError(t, rErr)
-		assert.Equal(t, len(readBuf), readBytes)
+		assert.NoError(rErr)
+		assert.Equal(len(readBuf), readBytes)
 
 		offset += int64(readBytes)
 	}
 
 	expectedNumConns := 1
-	assert.Equal(t, expectedNumConns, hf.NumConns())
+	assert.Equal(expectedNumConns, hf.NumConns())
 
 	// forcing to provision a new reader (except if backtracking)
 	readBytes, err := hf.ReadAt(readBuf, 0)
-	assert.NoError(t, err)
-	assert.Equal(t, len(readBuf), readBytes)
+	assert.NoError(err)
+	assert.Equal(len(readBuf), readBytes)
 
 	if !backtracking {
 		expectedNumConns += 1
 	}
 
-	assert.Equal(t, expectedNumConns, hf.NumConns())
+	assert.Equal(expectedNumConns, hf.NumConns())
 
 	// re-using the first one
 	readBytes, err = hf.ReadAt(readBuf, sequentialReadStop+int64(len(readBuf)))
-	assert.NoError(t, err)
-	assert.Equal(t, len(readBuf), readBytes)
+	assert.NoError(err)
+	assert.Equal(len(readBuf), readBytes)
 
-	assert.Equal(t, expectedNumConns, hf.NumConns())
+	assert.Equal(expectedNumConns, hf.NumConns())
 
 	// forcing a third one
 	readBytes, err = hf.ReadAt(readBuf, int64(len(fakeData))-int64(len(readBuf)))
-	assert.NoError(t, err)
-	assert.Equal(t, len(readBuf), readBytes)
+	assert.NoError(err)
+	assert.Equal(len(readBuf), readBytes)
 
 	expectedNumConns += 1
-	assert.Equal(t, expectedNumConns, hf.NumConns())
+	assert.Equal(expectedNumConns, hf.NumConns())
 
 	// re-using second one
 	readBytes, err = hf.ReadAt(readBuf, int64(len(readBuf)))
-	assert.NoError(t, err)
-	assert.Equal(t, len(readBuf), readBytes)
+	assert.NoError(err)
+	assert.Equal(len(readBuf), readBytes)
 
-	assert.Equal(t, expectedNumConns, hf.NumConns())
+	assert.Equal(expectedNumConns, hf.NumConns())
 
 	// and again, skipping a few
 	readBytes, err = hf.ReadAt(readBuf, int64(len(readBuf)*3))
-	assert.NoError(t, err)
-	assert.Equal(t, len(readBuf), readBytes)
+	assert.NoError(err)
+	assert.Equal(len(readBuf), readBytes)
 
-	assert.Equal(t, expectedNumConns, hf.NumConns())
+	assert.Equal(expectedNumConns, hf.NumConns())
 
 	// wait for readers to become stale
 	time.Sleep(time.Millisecond * time.Duration(200))
 
 	// now just read something random, should be back to 1 reader
 	readBytes, err = hf.ReadAt(readBuf, 0)
-	assert.NoError(t, err)
-	assert.Equal(t, len(readBuf), readBytes)
+	assert.NoError(err)
+	assert.Equal(len(readBuf), readBytes)
 
 	expectedNumConns = 1
-	assert.Equal(t, expectedNumConns, hf.NumConns())
+	assert.Equal(expectedNumConns, hf.NumConns())
 
 	err = hf.Close()
-	assert.NoError(t, err)
+	assert.NoError(err)
 }
 
 func Test_FileConcurrentReadAt(t *testing.T) {
+	assert := assert.New(t)
 	fakeData := []byte("abcdefghijklmnopqrstuvwxyz")
 
 	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{
@@ -482,11 +492,11 @@ func Test_FileConcurrentReadAt(t *testing.T) {
 	defer storageServer.CloseClientConnections()
 
 	hf, err := newSimple(t, storageServer.URL)
-	assert.NoError(t, err)
+	assert.NoError(err)
 
 	s, err := hf.Stat()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(len(fakeData)), s.Size())
+	assert.NoError(err)
+	assert.Equal(int64(len(fakeData)), s.Size())
 
 	done := make(chan bool)
 	errs := make(chan error)
@@ -501,8 +511,8 @@ func Test_FileConcurrentReadAt(t *testing.T) {
 				return
 			}
 
-			assert.Equal(t, readBytes, 1)
-			assert.Equal(t, string(buf), string(fakeData[i:i+1]))
+			assert.Equal(readBytes, 1)
+			assert.Equal(string(buf), string(fakeData[i:i+1]))
 
 			done <- true
 		}(i)
@@ -533,7 +543,7 @@ func Test_FileConcurrentReadAt(t *testing.T) {
 		t.FailNow()
 	}
 
-	assert.Equal(t, 0, hf.NumConns())
+	assert.Equal(0, hf.NumConns())
 }
 
 ////////////////////////
