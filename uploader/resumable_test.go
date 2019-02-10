@@ -22,6 +22,7 @@ import (
 )
 
 func Test_ChunkUploader(t *testing.T) {
+	assert := assert.New(t)
 	loudTests := os.Getenv("LOUD_TESTS") == "1"
 	log := func(format string, a ...interface{}) {
 		if loudTests {
@@ -50,7 +51,7 @@ func Test_ChunkUploader(t *testing.T) {
 	}
 	wtest.Must(t, ru.Close())
 
-	assert.EqualValues(t, ref.Bytes(), server.state.data)
+	assert.EqualValues(ref.Bytes(), server.state.data)
 	log("num blocks stored: %+v", server.state.numBlocksStored)
 }
 
