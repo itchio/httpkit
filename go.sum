@@ -55,6 +55,7 @@ github.com/itchio/headway v0.0.0-20190702175331-a4c65c5306de h1:RQW9xPqYtvjdHHRZ
 github.com/itchio/headway v0.0.0-20190702175331-a4c65c5306de/go.mod h1:Iif+7HeesRB0PvTYf0gOIFX8lj0za0SUsWryENQYt1E=
 github.com/itchio/httpkit v0.0.0-20190702085644-0636c33a1bcf/go.mod h1:FrHFbR76cgBWg9t9YKfrYcIeoflFFEF/FtP3namwM6Y=
 github.com/itchio/httpkit v0.0.0-20190702180702-5f405324454d/go.mod h1:p7x9HeOlKu7kkCT61a0uvwFkP2vnQmGFG2un1DFX86Y=
+github.com/itchio/httpkit v0.0.0-20190702180847-a60f0433f2d8/go.mod h1:W28DE7EhpaOiNA57xotM6rykDhhNM4Cq80XT5ClyES8=
 github.com/itchio/kompress v0.0.0-20180114163554-a19876f8c9b7 h1:gqIRCYkzS+k4wU9bkNTeHuvsx9y1/c4nO7Tlfa2GFUw=
 github.com/itchio/kompress v0.0.0-20180114163554-a19876f8c9b7/go.mod h1:cndTC6AwISkqfqzv503ekq6c7StsrYHGi3pJ9NEYLhs=
 github.com/itchio/kompress v0.0.0-20190702090658-5e2558a00102 h1:QXEwRXrrx+7CxU+Y+G4GpDk4mUeHbP7grMXHhydk8qU=
@@ -65,6 +66,7 @@ github.com/itchio/savior v0.0.0-20190430155913-9d507713b837 h1:l6xA+7sk+9dogSTw1
 github.com/itchio/savior v0.0.0-20190430155913-9d507713b837/go.mod h1:4w1REDB38i9+DIVw2+3X2w3FpW5K8v8rcO7OV7GaDs8=
 github.com/itchio/savior v0.0.0-20190702114049-0bf2b7091609 h1:2tkp7myES1FfA6jr+nvgjLXTpFQH7/lGaDpT1nToDPw=
 github.com/itchio/savior v0.0.0-20190702114049-0bf2b7091609/go.mod h1:FrqeQWn0tK7eF/EeckCZBnXbWbt+znl5h8tBBaQ32nE=
+github.com/itchio/savior v0.0.0-20190702181252-4d429729947d/go.mod h1:UqQ9soo8gOAnyeuBFTIUt6qKJmIdQP6D3YVLXJd3Sng=
 github.com/itchio/wharf v0.0.0-20181213155255-5c074d8f87a4 h1:+lsGaAGakbMki2lTQWUNkGy91RMx17R58RH4GnqeRsU=
 github.com/itchio/wharf v0.0.0-20181213155255-5c074d8f87a4/go.mod h1:+POTUNOKzhCiFy3BM0Qb7RHLTHazlOcypTnt7QbOeks=
 github.com/itchio/wharf v0.0.0-20190702115118-cbf9f8e600cd h1:ibeNq/BlAGxSa01i1PU3ZoZF7Yd+aE9Fkt7TzY+6hGI=
