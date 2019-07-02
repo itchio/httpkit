@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/itchio/httpkit/progress"
+	"github.com/itchio/headway/state"
+	"github.com/itchio/headway/united"
+
 	"github.com/itchio/savior/fullyrandom"
-	"github.com/itchio/wharf/state"
-	"github.com/itchio/wharf/wtest"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -46,10 +46,10 @@ func Test_ChunkUploader(t *testing.T) {
 	mw := io.MultiWriter(ref, ru)
 
 	for i := 0; i < 16; i++ {
-		wtest.Must(t, fullyrandom.Write(mw, 1*1024*1024, time.Now().UnixNano()))
+		tmust(t, fullyrandom.Write(mw, 1*1024*1024, time.Now().UnixNano()))
 		time.Sleep(500 * time.Millisecond)
 	}
-	wtest.Must(t, ru.Close())
+	tmust(t, ru.Close())
 
 	assert.EqualValues(ref.Bytes(), server.state.data)
 	log("num blocks stored: %+v", server.state.numBlocksStored)
@@ -98,9 +98,9 @@ func makeTestServer(t *testing.T, log func(msg string, a ...interface{})) *fakeG
 
 			storedTokens := strings.SplitN(storedString, "-", 2)
 			start, err := strconv.ParseInt(storedTokens[0], 10, 64)
-			wtest.Must(t, err)
+			tmust(t, err)
 			end, err := strconv.ParseInt(storedTokens[1], 10, 64)
-			wtest.Must(t, err)
+			tmust(t, err)
 			end++
 
 			sentBytes := int64(end - start)
@@ -129,7 +129,7 @@ func makeTestServer(t *testing.T, log func(msg string, a ...interface{})) *fakeG
 
 			defer r.Body.Close()
 			buf, err := ioutil.ReadAll(r.Body)
-			wtest.Must(t, err)
+			tmust(t, err)
 			fg.state.data = append(fg.state.data, buf...)
 			fg.state.head += int64(len(buf))
 			fg.state.numBlocksStored = append(fg.state.numBlocksStored, sentBytes/chunkSize)
@@ -137,7 +137,7 @@ func makeTestServer(t *testing.T, log func(msg string, a ...interface{})) *fakeG
 			if fg.settings.bandwidthBytesPerSec > 0 {
 				bps := fg.settings.bandwidthBytesPerSec
 				sleepDuration := time.Millisecond * time.Duration(float64(sentBytes)/float64(bps)*1000.0)
-				log("Sleeping %s (to simulating %s bandwidth)", sleepDuration, progress.FormatBPS(bps, time.Second))
+				log("Sleeping %s (to simulating %s bandwidth)", sleepDuration, united.FormatBPS(bps, time.Second))
 				time.Sleep(sleepDuration)
 			}
 
@@ -150,4 +150,14 @@ func makeTestServer(t *testing.T, log func(msg string, a ...interface{})) *fakeG
 	}))
 
 	return fg
+}
+
+// must shows a complete error stack and fails a test immediately
+// if err is non-nil
+func tmust(t *testing.T, err error) {
+	if err != nil {
+		t.Helper()
+		t.Errorf("%+v", err)
+		t.FailNow()
+	}
 }

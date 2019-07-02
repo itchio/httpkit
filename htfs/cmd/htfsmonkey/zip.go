@@ -15,10 +15,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/itchio/headway/united"
+
 	"github.com/itchio/arkive/zip"
-	"github.com/itchio/httpkit/progress"
-	"github.com/itchio/wharf/eos"
-	"github.com/itchio/wharf/eos/option"
+	"github.com/itchio/eos"
+	"github.com/itchio/eos/option"
 
 	"github.com/pkg/errors"
 )
@@ -31,7 +32,7 @@ func doZip() error {
 
 	zipBytes, err := ioutil.ReadFile(zipPath)
 	must(err)
-	log.Printf("Read %s zip file", progress.FormatBytes(int64(len(zipBytes))))
+	log.Printf("Read %s zip file", united.FormatBytes(int64(len(zipBytes))))
 	log.Printf("Validating...")
 
 	numFiles := 0
@@ -156,7 +157,7 @@ func doZip() error {
 	}
 
 	log.Printf("Files extracted: %d", filesExtracted)
-	log.Printf("Total extracted: %s", progress.FormatBytes(bytesExtracted))
+	log.Printf("Total extracted: %s", united.FormatBytes(bytesExtracted))
 
 	return nil
 }

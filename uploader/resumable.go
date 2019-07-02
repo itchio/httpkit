@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/itchio/httpkit/timeout"
-	"github.com/itchio/wharf/state"
+	"github.com/itchio/headway/state"
 	"github.com/pkg/errors"
 )
 

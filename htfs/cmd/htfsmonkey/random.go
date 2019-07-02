@@ -16,15 +16,15 @@ import (
 	"time"
 
 	"github.com/itchio/httpkit/htfs"
-	"github.com/itchio/wharf/eos"
-	"github.com/itchio/wharf/eos/option"
-	"github.com/itchio/wharf/wrand"
+	"github.com/itchio/eos"
+	"github.com/itchio/eos/option"
+	"github.com/itchio/randsource"
 	"github.com/pkg/errors"
 )
 
 func doRandom() error {
 	log.Printf("Generating fake data...")
-	prng := &wrand.RandReader{
+	prng := &randsource.Reader{
 		Source: rand.NewSource(time.Now().UnixNano()),
 	}
 	var fakeDataSize int64 = 32 * 1024 * 1024

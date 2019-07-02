@@ -7,7 +7,7 @@ import (
 
 	"github.com/itchio/httpkit/neterr"
 
-	"github.com/itchio/wharf/state"
+	"github.com/itchio/headway/state"
 )
 
 // Context stores state related to an operation that should
