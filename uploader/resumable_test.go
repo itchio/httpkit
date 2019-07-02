@@ -17,7 +17,7 @@ import (
 	"github.com/itchio/headway/state"
 	"github.com/itchio/headway/united"
 
-	"github.com/itchio/savior/fullyrandom"
+	"github.com/itchio/randsource/fullyrandom"
 	"github.com/stretchr/testify/assert"
 )
 
