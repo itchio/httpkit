@@ -47,11 +47,14 @@ github.com/itchio/dskompress v0.0.0-20180114183327-75b00f4ea5db/go.mod h1:MsJsjy
 github.com/itchio/dskompress v0.0.0-20190702113811-5e6f499be697/go.mod h1:clqOV8HXYpbDC3Bzia6urYIkfgwP1FnDr/C0q8KELmo=
 github.com/itchio/eos v0.0.0-20190702180533-a0c565ec2a43 h1:MPnM4Pat+KT5vSX+QxWeEWydBW7zObI9eis06eoE2lI=
 github.com/itchio/eos v0.0.0-20190702180533-a0c565ec2a43/go.mod h1:+GMzmsl8CWp+HltzaEb84nRFeyil+7OXVjGvgtvQ8Vc=
+github.com/itchio/eos v0.0.0-20190702180742-56bb53a0a101 h1:SJtzoopyrFmub2LTKLBKENuB1Phb9MzRPh+cZyfrMZ8=
+github.com/itchio/eos v0.0.0-20190702180742-56bb53a0a101/go.mod h1:RJcfD+GGt4BBIlbEXMB9KAltX09oMON26YnOY9z8DYQ=
 github.com/itchio/go-brotli v0.0.0-20180109133403-29899a447037/go.mod h1:phRC2CNxEo1e9F0o8pk6Vbll+3oDlrHKOLXKnTUJ7Q4=
 github.com/itchio/go-brotli v0.0.0-20190702114328-3f28d645a45c/go.mod h1:oRXh43p/JW9kWosasd+2kHfDpb1ec4m7YrZ5E39s1iI=
 github.com/itchio/headway v0.0.0-20190702175331-a4c65c5306de h1:RQW9xPqYtvjdHHRZR95XsaEA9B4URCuNHK78IuJcc+Y=
 github.com/itchio/headway v0.0.0-20190702175331-a4c65c5306de/go.mod h1:Iif+7HeesRB0PvTYf0gOIFX8lj0za0SUsWryENQYt1E=
 github.com/itchio/httpkit v0.0.0-20190702085644-0636c33a1bcf/go.mod h1:FrHFbR76cgBWg9t9YKfrYcIeoflFFEF/FtP3namwM6Y=
+github.com/itchio/httpkit v0.0.0-20190702180702-5f405324454d/go.mod h1:p7x9HeOlKu7kkCT61a0uvwFkP2vnQmGFG2un1DFX86Y=
 github.com/itchio/kompress v0.0.0-20180114163554-a19876f8c9b7 h1:gqIRCYkzS+k4wU9bkNTeHuvsx9y1/c4nO7Tlfa2GFUw=
 github.com/itchio/kompress v0.0.0-20180114163554-a19876f8c9b7/go.mod h1:cndTC6AwISkqfqzv503ekq6c7StsrYHGi3pJ9NEYLhs=
 github.com/itchio/kompress v0.0.0-20190702090658-5e2558a00102 h1:QXEwRXrrx+7CxU+Y+G4GpDk4mUeHbP7grMXHhydk8qU=
