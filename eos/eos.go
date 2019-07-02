@@ -10,7 +10,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/itchio/eos/option"
+	"github.com/itchio/httpkit/eos/option"
 	"github.com/itchio/httpkit/htfs"
 	"github.com/itchio/httpkit/retrycontext"
 	"github.com/pkg/errors"
