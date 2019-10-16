@@ -4,7 +4,7 @@ go 1.12
 
 require (
 	github.com/aristanetworks/goarista v0.0.0-20190628180533-8e7d5b18fe7a // indirect
-	github.com/efarrer/iothrottler v0.0.0-20141121142253-60e7e547c7fe
+	github.com/efarrer/iothrottler v0.0.1
 	github.com/getlantern/context v0.0.0-20190109183933-c447772a6520 // indirect
 	github.com/getlantern/errors v0.0.0-20190325191628-abdb3e3e36f7 // indirect
 	github.com/getlantern/fdcount v0.0.0-20170105153814-6a6cb5839bc5 // indirect
