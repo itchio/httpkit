@@ -4,11 +4,14 @@ package timeout
 
 import (
 	"crypto/tls"
+	"log"
 	"net"
 	"net/http"
 	"os"
+	"runtime"
 	"time"
 
+	"github.com/certifi/gocertifi"
 	"github.com/efarrer/iothrottler"
 	"github.com/getlantern/idletiming"
 	"github.com/pkg/errors"
@@ -88,7 +91,21 @@ func NewClient(connectTimeout time.Duration, readWriteTimeout time.Duration) *ht
 			InsecureSkipVerify: true,
 		}
 	}
-	http2.ConfigureTransport(transport)
+	if runtime.GOOS == "darwin" {
+		certPool, err := gocertifi.CACerts()
+		if err != nil {
+			log.Printf("Could not get gocertifi CA certs: %+v", err)
+		} else {
+			transport.TLSClientConfig = &tls.Config{
+				RootCAs: certPool,
+			}
+		}
+	}
+	err := http2.ConfigureTransport(transport)
+	if err != nil {
+		log.Printf("Could not configure transport for http/2: %+v", err)
+	}
+
 	return &http.Client{
 		Transport: transport,
 	}
