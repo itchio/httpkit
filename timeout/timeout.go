@@ -13,7 +13,7 @@ import (
 
 	"github.com/certifi/gocertifi"
 	"github.com/efarrer/iothrottler"
-	"github.com/getlantern/idletiming"
+	"github.com/itchio/httpkit/idle/idletiming"
 	"github.com/pkg/errors"
 	"golang.org/x/net/http2"
 )
