@@ -11,8 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/getlantern/netx"
 	"github.com/itchio/httpkit/idle/mtime"
+	"github.com/itchio/httpkit/idle/netx"
 )
 
 var (

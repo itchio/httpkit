@@ -226,7 +226,7 @@ func TestRead(t *testing.T) {
 	}
 
 	unpause()
-	grtracker.Check(t)
+	grtracker.CheckAfter(t, 500*time.Millisecond)
 
 	time.Sleep(slightlyMoreThanClientTimeout)
 	if !IsIdled(c) {
