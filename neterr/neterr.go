@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/itchio/httpkit/idle/idletiming"
+	"github.com/getlantern/idletiming"
 )
 
 // IsNetworkError returns true if the error's cause is: io.ErrUnexpectedEOF,
