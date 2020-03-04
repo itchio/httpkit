@@ -62,6 +62,7 @@ func Test_OpenRemoteDownloadBuild(t *testing.T) {
 	fakeData := []byte("aaaabbbb")
 
 	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{})
+	defer storageServer.Close()
 	defer storageServer.CloseClientConnections()
 
 	ifs := &itchtfs{storageServer.URL}
@@ -117,6 +118,7 @@ func Test_File(t *testing.T) {
 	fakeData := []byte("aaaabbbb")
 
 	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{})
+	defer storageServer.Close()
 	defer storageServer.CloseClientConnections()
 
 	f, err := newSimple(t, storageServer.URL)
@@ -146,6 +148,7 @@ func Test_FileNotFound(t *testing.T) {
 	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{
 		simulateNotFound: true,
 	})
+	defer storageServer.Close()
 	defer storageServer.CloseClientConnections()
 
 	_, err := newSimple(t, storageServer.URL)
@@ -165,6 +168,7 @@ func Test_FileEOF(t *testing.T) {
 			},
 		},
 	})
+	defer storageServer.Close()
 	defer storageServer.CloseClientConnections()
 
 	_, err := newSimple(t, storageServer.URL)
@@ -183,6 +187,7 @@ func Test_FileNoRange(t *testing.T) {
 	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{
 		simulateNoRangeSupport: true,
 	})
+	defer storageServer.Close()
 	defer storageServer.CloseClientConnections()
 
 	hf, err := newSimple(t, storageServer.URL)
@@ -205,6 +210,7 @@ func Test_File503(t *testing.T) {
 	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{
 		simulateOtherStatus: 503,
 	})
+	defer storageServer.Close()
 	defer storageServer.CloseClientConnections()
 
 	_, err := newSimple(t, storageServer.URL)
@@ -236,6 +242,7 @@ func Test_FileCodeDisruptions(t *testing.T) {
 				},
 			},
 		})
+		defer storageServer.Close()
 		defer storageServer.CloseClientConnections()
 
 		_, err := newSimple(t, storageServer.URL)
@@ -251,6 +258,7 @@ func Test_FileCodeDisruptions(t *testing.T) {
 				},
 			},
 		})
+		defer storageServer.Close()
 		defer storageServer.CloseClientConnections()
 
 		_, err := newSimple(t, storageServer.URL)
@@ -266,6 +274,7 @@ func Test_FileCodeDisruptions(t *testing.T) {
 				},
 			},
 		})
+		defer storageServer.Close()
 		defer storageServer.CloseClientConnections()
 
 		_, err := newSimple(t, storageServer.URL)
@@ -281,6 +290,7 @@ func Test_FileURLRenewal(t *testing.T) {
 		requiredT: 1,
 	}
 	storageServer := fakeStorage(t, fakeData, ctx)
+	defer storageServer.Close()
 	defer storageServer.CloseClientConnections()
 
 	serverBaseURL, err := url.Parse(storageServer.URL)
@@ -395,6 +405,7 @@ func testSequentialReads(t *testing.T, backtracking bool) {
 	fakeData := getBigFakeData()
 
 	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{})
+	defer storageServer.Close()
 	defer storageServer.CloseClientConnections()
 
 	hf, err := newSimple(t, storageServer.URL)
@@ -489,6 +500,7 @@ func Test_FileConcurrentReadAt(t *testing.T) {
 	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{
 		delay: 10 * time.Millisecond,
 	})
+	defer storageServer.Close()
 	defer storageServer.CloseClientConnections()
 
 	hf, err := newSimple(t, storageServer.URL)
