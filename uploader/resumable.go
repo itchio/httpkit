@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/itchio/httpkit/timeout"
 	"github.com/itchio/headway/state"
+	"github.com/itchio/httpkit/timeout"
 	"github.com/pkg/errors"
 )
 
@@ -123,7 +123,7 @@ func (ru *resumableUpload) Write(buf []byte) (int, error) {
 // Close implements io.Closer.
 func (ru *resumableUpload) Close() error {
 	if err := ru.checkError(); err != nil {
-		return err
+		return errors.Wrapf(err, "in resumableUpload.Close")
 	}
 
 	if ru.closed {

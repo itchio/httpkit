@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/itchio/headway/united"
 	"github.com/itchio/headway/counter"
 	"github.com/itchio/headway/state"
+	"github.com/itchio/headway/united"
 
 	"github.com/itchio/httpkit/retrycontext"
 	"github.com/pkg/errors"
@@ -56,13 +56,13 @@ func (cu *chunkUploader) put(buf []byte, last bool) error {
 		}
 	}
 
-	return fmt.Errorf("Too many errors, stopping upload")
+	return errors.Errorf("Too many errors, stopping upload")
 }
 
 func (cu *chunkUploader) tryPut(buf []byte, last bool) error {
 	buflen := int64(len(buf))
 	if !last && buflen%gcsChunkSize != 0 {
-		err := fmt.Errorf("internal error: trying to upload non-last buffer of %d bytes (not a multiple of chunk size %d)",
+		err := errors.Errorf("internal error: trying to upload non-last buffer of %d bytes (not a multiple of chunk size %d)",
 			buflen, gcsChunkSize)
 		return errors.WithStack(err)
 	}
@@ -120,7 +120,7 @@ func (cu *chunkUploader) tryPut(buf []byte, last bool) error {
 		statusRes, err := cu.queryStatus()
 		if err != nil {
 			// this happens after we retry the query a few times
-			return err
+			return errors.Wrap(err, "in chunkUpload.tryPut, while querying status")
 		}
 
 		if statusRes.StatusCode == 308 {
@@ -129,9 +129,9 @@ func (cu *chunkUploader) tryPut(buf []byte, last bool) error {
 			status = gcsResume
 		} else {
 			status = interpretGcsStatusCode(statusRes.StatusCode)
-			err = fmt.Errorf("expected upload status, got HTTP %s (%s) instead", statusRes.Status, status)
+			err = errors.Errorf("expected upload status, got HTTP %s (%s) instead", statusRes.Status, status)
 			cu.debugf(err.Error())
-			return err
+			return errors.Wrap(err, "in chunkUpload.tryPut, after getting non-308 status code")
 		}
 	}
 
@@ -145,11 +145,11 @@ func (cu *chunkUploader) tryPut(buf []byte, last bool) error {
 
 		committedRange, err := parseRangeHeader(rangeHeader)
 		if err != nil {
-			return err
+			return errors.Wrap(err, "in chunkUploader.tryPut, while parsing range header")
 		}
 
 		if committedRange.start != 0 {
-			return fmt.Errorf("upload failed: beginning not committed somehow (committed range: %s)", committedRange)
+			return errors.Errorf("upload failed: beginning not committed somehow (committed range: %s)", committedRange)
 		}
 
 		committedBytes := committedRange.end - cu.offset
@@ -161,7 +161,7 @@ func (cu *chunkUploader) tryPut(buf []byte, last bool) error {
 		}
 
 		if committedBytes < 0 {
-			return fmt.Errorf("upload failed: committed negative bytes somehow (committed range: %s, expectedOffset: %d)", committedRange, expectedOffset)
+			return errors.Errorf("upload failed: committed negative bytes somehow (committed range: %s, expectedOffset: %d)", committedRange, expectedOffset)
 		}
 
 		if committedBytes > 0 {
@@ -173,7 +173,7 @@ func (cu *chunkUploader) tryPut(buf []byte, last bool) error {
 		return &retryError{committedBytes}
 	}
 
-	return fmt.Errorf("got HTTP %d (%s)", res.StatusCode, status)
+	return errors.Errorf("got HTTP %d (%s)", res.StatusCode, status)
 }
 
 func (cu *chunkUploader) queryStatus() (*http.Response, error) {
@@ -189,7 +189,7 @@ func (cu *chunkUploader) queryStatus() (*http.Response, error) {
 		return res, nil
 	}
 
-	return nil, fmt.Errorf("gave up on trying to get upload status")
+	return nil, errors.Errorf("gave up on trying to get upload status")
 }
 
 func (cu *chunkUploader) tryQueryStatus() (*http.Response, error) {
@@ -214,7 +214,7 @@ func (cu *chunkUploader) tryQueryStatus() (*http.Response, error) {
 		return res, nil
 	}
 
-	return nil, fmt.Errorf("while querying status, got HTTP %s (status %s)", res.Status, status)
+	return nil, errors.Errorf("while querying status, got HTTP %s (status %s)", res.Status, status)
 }
 
 func (cu *chunkUploader) debugf(msg string, args ...interface{}) {

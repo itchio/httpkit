@@ -158,7 +158,7 @@ func (bt *backtracker) Discard(n int64) error {
 
 		discarded, err := bt.Read(bt.discardBuf[:readlen])
 		if err != nil {
-			return errors.WithMessage(err, "discarding")
+			return errors.Wrapf(err, "in backtracker.Discard")
 		}
 
 		n -= int64(discarded)
@@ -172,7 +172,7 @@ func (bt *backtracker) Cached() int64 {
 
 func (bt *backtracker) Backtrack(n int64) error {
 	if int64(bt.cached) < n {
-		return errors.Errorf("only %d cached, can't backtrack by %d", bt.cached, n)
+		return errors.Errorf("in backtracker.Backtrack, only %d cached, can't backtrack by %d", bt.cached, n)
 	}
 	bt.backtrack = int(n)
 	return nil

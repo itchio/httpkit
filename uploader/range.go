@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/pkg/errors"
 )
 
 type httpRange struct {
@@ -14,14 +16,14 @@ type httpRange struct {
 func parseRangeHeader(rangeHeader string) (r *httpRange, err error) {
 	keyval := strings.Split(rangeHeader, "=")
 	if len(keyval) != 2 {
-		err = fmt.Errorf("invalid range header, expected \"key=val\", got \"%s\"", rangeHeader)
+		err = errors.Errorf("invalid range header, expected \"key=val\", got \"%s\"", rangeHeader)
 		return
 	}
 	val := keyval[1]
 
 	startEnd := strings.Split(val, "-")
 	if len(startEnd) != 2 {
-		err = fmt.Errorf("invalid range header, expected \"start-end\", got \"%s\"", val)
+		err = errors.Errorf("invalid range header, expected \"start-end\", got \"%s\"", val)
 		return
 	}
 

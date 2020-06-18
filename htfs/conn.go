@@ -40,7 +40,7 @@ func (c *conn) Connect(offset int64) error {
 	if c.body != nil {
 		err := c.body.Close()
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "in conn.Connect, while closing previous body")
 		}
 
 		c.body = nil
@@ -58,7 +58,7 @@ func (c *conn) Connect(offset int64) error {
 			if _, ok := err.(*needsRenewalError); ok {
 				renewalTries++
 				if renewalTries >= maxRenewals {
-					return ErrTooManyRenewals
+					return errors.Wrapf(ErrTooManyRenewals, "in conn.Connect, exceeded maxRenewals")
 				}
 				hf.log("[%9d-%9d] (Connect) renewing on %v", offset, offset, err)
 
@@ -66,7 +66,7 @@ func (c *conn) Connect(offset int64) error {
 				if err != nil {
 					// if we reach this point, we've failed to generate
 					// a download URL a bunch of times in a row
-					return err
+					return errors.Wrapf(err, "in conn.Connect (failed to generate URLs a few times)")
 				}
 				continue
 			} else if hf.shouldRetry(err) {
@@ -74,7 +74,7 @@ func (c *conn) Connect(offset int64) error {
 				retryCtx.Retry(err)
 				continue
 			} else {
-				return err
+				return errors.Wrapf(err, "in conn.Connect, non-retriable error")
 			}
 		}
 
@@ -85,7 +85,7 @@ func (c *conn) Connect(offset int64) error {
 		return nil
 	}
 
-	return errors.WithMessage(retryCtx.LastError, "htfs connect")
+	return errors.Wrapf(retryCtx.LastError, "in conn.Connect, exhausted retry context")
 }
 
 func (c *conn) renewURLWithRetries(offset int64) error {
@@ -103,13 +103,13 @@ func (c *conn) renewURLWithRetries(offset int64) error {
 				continue
 			} else {
 				hf.log("[%9d-%9d] (Connect) bailing on %v", offset, offset, err)
-				return err
+				return errors.Wrapf(err, "in conn.renewURLWithRetries, non-retriable error")
 			}
 		}
 
 		return nil
 	}
-	return errors.WithMessage(renewRetryCtx.LastError, "htfs renew")
+	return errors.Wrapf(renewRetryCtx.LastError, "in conn.renewURLWithRetries, exhausted retry context")
 }
 
 func (c *conn) tryConnect(offset int64) error {
@@ -117,7 +117,7 @@ func (c *conn) tryConnect(offset int64) error {
 
 	req, err := http.NewRequest("GET", hf.currentURL, nil)
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "in conn.tryConnect, while creating new GET request")
 	}
 
 	byteRange := fmt.Sprintf("bytes=%d-", offset)
@@ -125,12 +125,18 @@ func (c *conn) tryConnect(offset int64) error {
 
 	res, err := hf.client.Do(req)
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "in conn.tryConnect, while doing GET request")
 	}
 
 	if res.StatusCode == 200 && offset > 0 {
 		defer res.Body.Close()
-		return errors.WithStack(&ServerError{Host: req.Host, Message: fmt.Sprintf("HTTP Range header not supported"), Code: ServerErrorCodeNoRangeSupport, StatusCode: res.StatusCode})
+		se := &ServerError{
+			Host:       req.Host,
+			Message:    "HTTP Range header not supported",
+			Code:       ServerErrorCodeNoRangeSupport,
+			StatusCode: res.StatusCode,
+		}
+		return errors.Wrapf(se, "in conn.tryConnect, got HTTP 200 for non-zero offset")
 	}
 
 	if res.StatusCode/100 != 2 {
@@ -145,7 +151,12 @@ func (c *conn) tryConnect(offset int64) error {
 			return &needsRenewalError{url: hf.currentURL}
 		}
 
-		return errors.WithStack(&ServerError{Host: req.Host, Message: fmt.Sprintf("HTTP %d: %v", res.StatusCode, string(body)), StatusCode: res.StatusCode})
+		se := &ServerError{
+			Host:       req.Host,
+			Message:    fmt.Sprintf("HTTP %d: %v", res.StatusCode, string(body)),
+			StatusCode: res.StatusCode,
+		}
+		return errors.Wrapf(se, "in conn.tryConnect, got HTTP non-2XX")
 	}
 
 	c.Backtracker = backtracker.New(offset, res.Body, maxDiscard)
@@ -164,7 +175,7 @@ func (c *conn) Close() error {
 		c.body = nil
 
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "in conn.Close")
 		}
 	}
 

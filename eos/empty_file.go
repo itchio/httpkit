@@ -1,10 +1,11 @@
 package eos
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"time"
+
+	"github.com/pkg/errors"
 )
 
 type emptyFile struct{}
@@ -17,7 +18,7 @@ func (ef *emptyFile) Close() error {
 
 func (ef *emptyFile) Seek(offset int64, mode int) (int64, error) {
 	if offset != 0 {
-		return 0, fmt.Errorf("cannot seek into /dev/null")
+		return 0, errors.Errorf("cannot seek into /dev/null")
 	}
 	return 0, nil
 }

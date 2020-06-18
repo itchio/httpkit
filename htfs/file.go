@@ -173,19 +173,19 @@ func Open(getURL GetURLFunc, needsRenewal NeedsRenewalFunc, settings *Settings) 
 
 	urlStr, err := getURL()
 	if err != nil {
-		return nil, errors.WithMessage(normalizeError(err), "htfs.Open (getting URL)")
+		return nil, errors.Wrapf(normalizeError(err), "htfs.Open (getting URL)")
 	}
 	f.currentURL = urlStr
 
 	c, err := f.borrowConn(0)
 	if err != nil {
-		return nil, errors.WithMessage(normalizeError(err), "htfs.Open (initial request)")
+		return nil, errors.Wrapf(normalizeError(err), "htfs.Open (initial request)")
 	}
 	f.header = c.header
 
 	err = f.returnConn(c)
 	if err != nil {
-		return nil, errors.WithMessage(normalizeError(err), "htfs.Open (return conn after initial request)")
+		return nil, errors.Wrapf(normalizeError(err), "htfs.Open (return conn after initial request)")
 	}
 
 	f.requestURL = c.requestURL
@@ -196,7 +196,7 @@ func Open(getURL GetURLFunc, needsRenewal NeedsRenewalFunc, settings *Settings) 
 		totalBytesStr := rangeTokens[len(rangeTokens)-1]
 		f.size, err = strconv.ParseInt(totalBytesStr, 10, 64)
 		if err != nil {
-			return nil, fmt.Errorf("Could not parse file size: %s", err.Error())
+			return nil, errors.Wrapf(normalizeError(err), "Could not parse file size")
 		}
 	} else if c.statusCode == 200 {
 		f.size = c.contentLength
@@ -407,14 +407,14 @@ func (f *File) Seek(offset int64, whence int) (int64, error) {
 	var newOffset int64
 
 	switch whence {
-	case os.SEEK_SET:
+	case io.SeekStart:
 		newOffset = offset
-	case os.SEEK_END:
+	case io.SeekEnd:
 		newOffset = f.size + offset
-	case os.SEEK_CUR:
+	case io.SeekCurrent:
 		newOffset = f.offset + offset
 	default:
-		return f.offset, fmt.Errorf("invalid whence value %d", whence)
+		return f.offset, errors.Errorf("invalid whence value %d", whence)
 	}
 
 	if newOffset < 0 {
@@ -567,7 +567,7 @@ func isHTTPStatus(err error, statusCode int) bool {
 
 func normalizeError(err error) error {
 	if isHTTPStatus(err, 404) {
-		return ErrNotFound
+		return errors.WithStack(ErrNotFound)
 	}
 	return err
 }
@@ -576,7 +576,7 @@ func (f *File) closeAllConns() error {
 	for _, c := range f.conns {
 		err := f.closeConn(c)
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "in File.closeAllConns")
 		}
 	}
 
@@ -613,7 +613,7 @@ func (f *File) Close() error {
 
 	err := f.closeAllConns()
 	if err != nil {
-		return err
+		return errors.Wrap(err, "in File.Close")
 	}
 
 	if f.DumpStats {

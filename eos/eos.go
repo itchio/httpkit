@@ -40,7 +40,7 @@ func RegisterHandler(h Handler) error {
 	scheme := h.Scheme()
 
 	if handlers[scheme] != nil {
-		return fmt.Errorf("already have a handler for %s:", scheme)
+		return errors.Errorf("already have a handler for %s:", scheme)
 	}
 
 	handlers[h.Scheme()] = h
@@ -105,7 +105,7 @@ func realOpen(name string, opts ...option.Option) (File, error) {
 
 	u, err := url.Parse(name)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, errors.Wrapf(err, "While parsing URL")
 	}
 
 	htfsSettings := func() *htfs.Settings {
