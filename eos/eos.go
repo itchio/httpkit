@@ -3,6 +3,7 @@
 package eos
 
 import (
+	"crypto/sha1"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,7 +19,6 @@ import (
 
 var htfsLogLevel = os.Getenv("HTFS_DEBUG")
 var htfsCheck = os.Getenv("HTFS_CHECK") == "1"
-var hfSeed = 0
 
 type File interface {
 	io.Reader
@@ -119,11 +119,9 @@ func realOpen(name string, opts ...option.Option) (File, error) {
 		}
 
 		if htfsLogLevel != "" {
-			hfSeed++
-			hfIndex := hfSeed
-
+			fingerprint := fmt.Sprintf("%x", sha1.Sum([]byte(name)))[:7]
 			s.Log = func(msg string) {
-				fmt.Fprintf(os.Stderr, "[hf%d] %s\n", hfIndex, msg)
+				fmt.Fprintf(os.Stderr, "[%s] %s\n", fingerprint, msg)
 			}
 			numericLevel, err := strconv.ParseInt(htfsLogLevel, 10, 64)
 			if err == nil {
