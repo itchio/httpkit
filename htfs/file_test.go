@@ -558,6 +558,27 @@ func Test_FileConcurrentReadAt(t *testing.T) {
 	assert.Equal(0, hf.NumConns())
 }
 
+func Test_UnexpectedEOF(t *testing.T) {
+	assert := assert.New(t)
+	fakeData := getBigFakeData()
+
+	storageServer := fakeStorage(t, fakeData, &fakeStorageContext{
+		numUnexpectedEOF: 2,
+	})
+	defer storageServer.Close()
+	defer storageServer.CloseClientConnections()
+
+	hf, err := newSimple(t, storageServer.URL)
+	assert.NoError(err)
+
+	ignored := int64(len(fakeData) / 2)
+	rest := int64(len(fakeData)) - ignored
+
+	b := make([]byte, rest)
+	_, err = hf.ReadAt(b, ignored)
+	assert.NoError(err)
+}
+
 ////////////////////////
 // fake storage
 ////////////////////////
@@ -569,6 +590,7 @@ type fakeStorageContext struct {
 	simulateNoRangeSupport bool
 	simulateNotFound       bool
 	simulateOtherStatus    int
+	numUnexpectedEOF       int
 	requiredT              int64
 	numGET                 int
 	numHEAD                int
@@ -691,7 +713,16 @@ func fakeStorage(t *testing.T, content []byte, ctx *fakeStorageContext) *httptes
 			w.WriteHeader(206)
 		}
 
-		sr := io.NewSectionReader(bytes.NewReader(content), start, end+1-start)
+		sectionStart := start
+		sectionEnd := end + 1 - start
+		if ctx.numUnexpectedEOF > 0 {
+			t.Logf("triggering unexpected EOF")
+			ctx.numUnexpectedEOF -= 1
+			remain := sectionEnd - sectionStart
+			sectionEnd -= remain / 2
+		}
+
+		sr := io.NewSectionReader(bytes.NewReader(content), sectionStart, sectionEnd)
 		_, err := io.Copy(w, sr)
 		if err != nil {
 			if strings.Contains(err.Error(), "broken pipe") {
