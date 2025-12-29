@@ -83,8 +83,9 @@ func timeoutDialer(cTimeout time.Duration, rwTimeout time.Duration) func(net, ad
 // NewClient returns a new http client with custom connect and r/w timeouts.
 func NewClient(connectTimeout time.Duration, readWriteTimeout time.Duration) *http.Client {
 	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		Dial:  timeoutDialer(connectTimeout, readWriteTimeout),
+		Proxy:           http.ProxyFromEnvironment,
+		Dial:            timeoutDialer(connectTimeout, readWriteTimeout),
+		IdleConnTimeout: readWriteTimeout,
 	}
 	if IgnoreCertificateErrors {
 		transport.TLSClientConfig = &tls.Config{
