@@ -47,18 +47,19 @@ func NewDefault() *Context {
 // ShouldTry must be used in a loop, like so:
 //
 // ----------------------------------------
-// for rc.ShouldRetry() {
-//	 err := someOperation()
-//	 if err != nil {
-//		 if isRetriable(err) {
-//			 rc.Retry(err.Error())
-//			 continue
-//		 }
-//	 }
 //
-//	 // succeeded!
-//	 return nil // escape from loop
-// }
+//	for rc.ShouldRetry() {
+//		 err := someOperation()
+//		 if err != nil {
+//			 if isRetriable(err) {
+//				 rc.Retry(err.Error())
+//				 continue
+//			 }
+//		 }
+//
+//		 // succeeded!
+//		 return nil // escape from loop
+//	}
 //
 // // THIS IS IMPORTANT
 // return errors.New("task: too many failures, giving up")

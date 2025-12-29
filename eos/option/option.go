@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/itchio/httpkit/timeout"
 	"github.com/itchio/headway/state"
+	"github.com/itchio/httpkit/timeout"
 )
 
 type EOSSettings struct {
