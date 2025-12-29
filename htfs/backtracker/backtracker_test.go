@@ -3,7 +3,6 @@ package backtracker_test
 import (
 	"bytes"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"testing"
 	"time"
@@ -84,7 +83,7 @@ func Test_BackTrackerTiny(t *testing.T) {
 
 	hasOffset(10)
 
-	finalbuf, err := ioutil.ReadAll(bt)
+	finalbuf, err := io.ReadAll(bt)
 	assert.NoError(err)
 	assert.EqualValues([]byte{10, 11, 12, 13, 14, 15}, finalbuf)
 }
@@ -98,7 +97,7 @@ func Test_BacktrackerNoCache(t *testing.T) {
 
 	bt := backtracker.New(0, bytes.NewReader(buf), 0)
 
-	buf2, err := ioutil.ReadAll(bt)
+	buf2, err := io.ReadAll(bt)
 	assert.NoError(err)
 	assert.EqualValues(buf, buf2)
 }
@@ -200,7 +199,7 @@ func Test_BacktrackerOffset(t *testing.T) {
 	bt := backtracker.New(4, bytes.NewReader([]byte{4, 5, 6, 7}), 2)
 	assert.EqualValues(4, bt.Offset())
 
-	buf, err := ioutil.ReadAll(bt)
+	buf, err := io.ReadAll(bt)
 	assert.NoError(err)
 	assert.EqualValues([]byte{4, 5, 6, 7}, buf)
 }

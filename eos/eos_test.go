@@ -2,7 +2,7 @@ package eos
 
 import (
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -41,14 +41,14 @@ func Test_OpenEmptyFile(t *testing.T) {
 }
 
 func Test_OpenLocalFile(t *testing.T) {
-	mainDir, err := ioutil.TempDir("", "eos-local")
+	mainDir, err := os.MkdirTemp("", "eos-local")
 	assert.NoError(t, err)
 	defer os.RemoveAll(mainDir)
 
 	assert.NoError(t, os.MkdirAll(mainDir, 0755))
 
 	fileName := filepath.Join(mainDir, "some-file")
-	assert.NoError(t, ioutil.WriteFile(fileName, []byte{4, 2, 6, 9}, 0644))
+	assert.NoError(t, os.WriteFile(fileName, []byte{4, 2, 6, 9}, 0644))
 
 	f, err := Open(fileName)
 	assert.NoError(t, err)
@@ -125,7 +125,7 @@ func Test_Htfs(t *testing.T) {
 	assert.NoError(t, err)
 	assert.EqualValues(t, len(fakeData), s.Size())
 
-	readData, err := ioutil.ReadAll(f)
+	readData, err := io.ReadAll(f)
 	assert.NoError(t, err)
 	assert.EqualValues(t, fakeData, readData)
 

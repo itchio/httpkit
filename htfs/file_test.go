@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
@@ -80,7 +79,7 @@ func Test_OpenRemoteDownloadBuild(t *testing.T) {
 	assert.NoError(err)
 	assert.Equal(int64(len(fakeData)), s.Size())
 
-	readFakeData, err := ioutil.ReadAll(f)
+	readFakeData, err := io.ReadAll(f)
 	assert.NoError(err)
 	assert.Equal(len(fakeData), len(readFakeData))
 	assert.Equal(fakeData, readFakeData)

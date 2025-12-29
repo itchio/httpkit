@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"time"
@@ -142,7 +141,7 @@ func (c *conn) tryConnect(offset int64) error {
 	if res.StatusCode/100 != 2 {
 		defer res.Body.Close()
 
-		body, err := ioutil.ReadAll(res.Body)
+		body, err := io.ReadAll(res.Body)
 		if err != nil {
 			body = []byte("could not read error body")
 		}

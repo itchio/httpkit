@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -128,7 +127,7 @@ func makeTestServer(t *testing.T, log func(msg string, a ...interface{})) *fakeG
 			}
 
 			defer r.Body.Close()
-			buf, err := ioutil.ReadAll(r.Body)
+			buf, err := io.ReadAll(r.Body)
 			tmust(t, err)
 			fg.state.data = append(fg.state.data, buf...)
 			fg.state.head += int64(len(buf))
