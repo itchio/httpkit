@@ -1,6 +1,6 @@
 module github.com/itchio/httpkit
 
-go 1.21
+go 1.23.0
 
 require (
 	github.com/certifi/gocertifi v0.0.0-20200211180108-c7c1fbc02894
@@ -10,7 +10,7 @@ require (
 	github.com/itchio/randsource v0.0.0-20190703104731-3f6d22f91927
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.8.4
-	golang.org/x/net v0.35.0
+	golang.org/x/net v0.38.0
 )
 
 require (
@@ -32,7 +32,7 @@ require (
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
 	go.uber.org/zap v1.19.1 // indirect
-	golang.org/x/text v0.22.0 // indirect
+	golang.org/x/text v0.23.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20200227125254-8fa46927fb4f // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
