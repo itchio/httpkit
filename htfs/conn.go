@@ -122,10 +122,16 @@ func (c *conn) tryConnect(offset int64) error {
 	byteRange := fmt.Sprintf("bytes=%d-", offset)
 	req.Header.Set("Range", byteRange)
 
+	hf.log("[%9d-%9d] (tryConnect) GET %s Range: %s", offset, offset, hf.currentURL, byteRange)
+
+	requestStart := time.Now()
 	res, err := hf.client.Do(req)
 	if err != nil {
+		hf.log("[%9d-%9d] (tryConnect) error after %s: %v", offset, offset, time.Since(requestStart), err)
 		return errors.Wrapf(err, "in conn.tryConnect, while doing GET request")
 	}
+
+	hf.log("[%9d-%9d] (tryConnect) HTTP %d in %s (content-length: %d)", offset, offset, res.StatusCode, time.Since(requestStart), res.ContentLength)
 
 	if res.StatusCode == 200 && offset > 0 {
 		defer res.Body.Close()

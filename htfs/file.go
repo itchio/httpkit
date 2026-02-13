@@ -488,6 +488,7 @@ func (f *File) readAt(data []byte, offset int64) (int, error) {
 	bytesToRead := len(data)
 
 	for totalBytesRead < bytesToRead {
+		readStart := time.Now()
 		bytesRead, err := c.Read(data[totalBytesRead:])
 		totalBytesRead += bytesRead
 
@@ -510,7 +511,7 @@ func (f *File) readAt(data []byte, offset int64) (int, error) {
 				// this will retry a bunch of times before returning
 				// EOF, which is less than ideal, but in my defense,
 				// screw those servers.
-				f.log("Got %s, retrying", err.Error())
+				f.log("Got %s after %s, retrying (read %d/%d bytes)", err.Error(), time.Since(readStart), totalBytesRead, bytesToRead)
 				err = c.Connect(c.Offset())
 				if err != nil {
 					return totalBytesRead, err
