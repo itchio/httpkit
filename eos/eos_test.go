@@ -1,6 +1,7 @@
 package eos
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,7 +17,7 @@ import (
 )
 
 func Test_OpenEmptyFile(t *testing.T) {
-	f, err := Open("/dev/null")
+	f, err := Open(context.Background(), "/dev/null")
 	assert.NoError(t, err)
 
 	s, err := f.Stat()
@@ -50,7 +51,7 @@ func Test_OpenLocalFile(t *testing.T) {
 	fileName := filepath.Join(mainDir, "some-file")
 	assert.NoError(t, os.WriteFile(fileName, []byte{4, 2, 6, 9}, 0644))
 
-	f, err := Open(fileName)
+	f, err := Open(context.Background(), fileName)
 	assert.NoError(t, err)
 
 	s, err := f.Stat()
@@ -72,7 +73,7 @@ func (tfs *testfs) MakeResource(u *url.URL) (htfs.GetURLFunc, htfs.NeedsRenewalF
 	return tfs.GetURL, tfs.NeedsRenewal, nil
 }
 
-func (tfs *testfs) GetURL() (string, error) {
+func (tfs *testfs) GetURL(context.Context) (string, error) {
 	return tfs.url, nil
 }
 
@@ -95,10 +96,10 @@ func Test_OpenRemoteDownloadBuild(t *testing.T) {
 	assert.Error(t, RegisterHandler(tfs))
 	defer DeregisterHandler(tfs)
 
-	f, err := Open("nofs:///not-quite")
+	f, err := Open(context.Background(), "nofs:///not-quite")
 	assert.Error(t, err)
 
-	f, err = Open("testfs:///now/we/are/talking")
+	f, err = Open(context.Background(), "testfs:///now/we/are/talking")
 	assert.NoError(t, err)
 
 	stats, err := f.Stat()
@@ -118,7 +119,7 @@ func Test_Htfs(t *testing.T) {
 	}))
 	defer server.CloseClientConnections()
 
-	f, err := Open(server.URL)
+	f, err := Open(context.Background(), server.URL)
 	assert.NoError(t, err)
 
 	s, err := f.Stat()

@@ -1,6 +1,7 @@
 package retrycontext
 
 import (
+	"context"
 	"math"
 	"math/rand"
 	"time"
@@ -52,7 +53,9 @@ func NewDefault() *Context {
 //		 err := someOperation()
 //		 if err != nil {
 //			 if isRetriable(err) {
-//				 rc.Retry(err.Error())
+//				 if err := rc.Retry(ctx, err); err != nil {
+//					 return err
+//				 }
 //				 continue
 //			 }
 //		 }
@@ -73,8 +76,10 @@ func (rc *Context) ShouldTry() bool {
 
 // Retry records an error that was retried (accessible in LastError)
 // If a consumer was passed, it'll pause progress, and log the error.
-// It's also in charge of sleeping (following exponential backoff)
-func (rc *Context) Retry(err error) {
+// It's also in charge of sleeping (following exponential backoff), cut
+// short if ctx is done. A non-nil return means ctx is done and the caller
+// should stop retrying.
+func (rc *Context) Retry(ctx context.Context, err error) error {
 	rc.LastError = err
 
 	if rc.Settings.Consumer != nil {
@@ -102,7 +107,12 @@ func (rc *Context) Retry(err error) {
 			rc.Settings.FakeSleep(sleepDuration)
 		}
 	} else {
-		time.Sleep(sleepDuration)
+		timer := time.NewTimer(sleepDuration)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+		case <-timer.C:
+		}
 	}
 
 	rc.Tries++
@@ -110,4 +120,5 @@ func (rc *Context) Retry(err error) {
 	if rc.Settings.Consumer != nil {
 		rc.Settings.Consumer.ResumeProgress()
 	}
+	return ctx.Err()
 }

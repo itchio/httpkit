@@ -3,6 +3,7 @@
 package eos
 
 import (
+	"context"
 	"crypto/sha1"
 	"fmt"
 	"io"
@@ -55,7 +56,7 @@ type simpleHTTPResource struct {
 	url string
 }
 
-func (shr *simpleHTTPResource) GetURL() (string, error) {
+func (shr *simpleHTTPResource) GetURL(context.Context) (string, error) {
 	return shr.url, nil
 }
 
@@ -63,8 +64,8 @@ func (shr *simpleHTTPResource) NeedsRenewal(res *http.Response, body []byte) boo
 	return false
 }
 
-func Open(name string, opts ...option.Option) (File, error) {
-	f, err := realOpen(name, opts...)
+func Open(ctx context.Context, name string, opts ...option.Option) (File, error) {
+	f, err := realOpen(ctx, name, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +79,7 @@ func Open(name string, opts ...option.Option) (File, error) {
 	if hf, ok := f.(*htfs.File); ok && forceHtfsCheck {
 		hf.ForbidBacktracking = true
 
-		f2, err := realOpen(name, opts...)
+		f2, err := realOpen(ctx, name, opts...)
 		if err != nil {
 			return nil, err
 		}
@@ -92,7 +93,7 @@ func Open(name string, opts ...option.Option) (File, error) {
 	return f, err
 }
 
-func realOpen(name string, opts ...option.Option) (File, error) {
+func realOpen(ctx context.Context, name string, opts ...option.Option) (File, error) {
 	settings := option.DefaultSettings()
 
 	for _, opt := range opts {
@@ -134,7 +135,7 @@ func realOpen(name string, opts ...option.Option) (File, error) {
 	switch u.Scheme {
 	case "http", "https":
 		res := &simpleHTTPResource{name}
-		hf, err := htfs.Open(res.GetURL, res.NeedsRenewal, htfsSettings())
+		hf, err := htfs.Open(ctx, res.GetURL, res.NeedsRenewal, htfsSettings())
 
 		if err != nil {
 			return nil, err
@@ -152,7 +153,7 @@ func realOpen(name string, opts ...option.Option) (File, error) {
 			return nil, errors.WithStack(err)
 		}
 
-		hf, err := htfs.Open(getURL, needsRenewal, htfsSettings())
+		hf, err := htfs.Open(ctx, getURL, needsRenewal, htfsSettings())
 
 		if err != nil {
 			return nil, err

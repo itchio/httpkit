@@ -2,6 +2,7 @@ package htfs_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"math/rand"
@@ -33,7 +34,7 @@ func (ifs *itchtfs) MakeResource(u *url.URL) (htfs.GetURLFunc, htfs.NeedsRenewal
 	return ifs.GetURL, ifs.NeedsRenewal, nil
 }
 
-func (ifs *itchtfs) GetURL() (string, error) {
+func (ifs *itchtfs) GetURL(context.Context) (string, error) {
 	return ifs.url, nil
 }
 
@@ -72,7 +73,7 @@ func Test_OpenRemoteDownloadBuild(t *testing.T) {
 	getURL, needsRenewal, err := ifs.MakeResource(u)
 	assert.NoError(err)
 
-	f, err := htfs.Open(getURL, needsRenewal, defaultSettings(t))
+	f, err := htfs.Open(context.Background(), getURL, needsRenewal, defaultSettings(t))
 	assert.NoError(err)
 
 	s, err := f.Stat()
@@ -97,7 +98,7 @@ func Test_OpenRemoteDownloadBuild(t *testing.T) {
 }
 
 func newSimple(t *testing.T, url string) (*htfs.File, error) {
-	getURL := func() (string, error) {
+	getURL := func(context.Context) (string, error) {
 		return url, nil
 	}
 
@@ -105,7 +106,7 @@ func newSimple(t *testing.T, url string) (*htfs.File, error) {
 		return false
 	}
 
-	hf, err := htfs.Open(getURL, needsRenewal, defaultSettings(t))
+	hf, err := htfs.Open(context.Background(), getURL, needsRenewal, defaultSettings(t))
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -299,7 +300,7 @@ func Test_FileURLRenewal(t *testing.T) {
 	renewalsAdvertised := 0
 	renewalsDone := 0
 
-	getURL := func() (string, error) {
+	getURL := func(context.Context) (string, error) {
 		renewalsDone++
 		sbuv := *serverBaseURL
 		newURL := &sbuv
@@ -326,7 +327,7 @@ func Test_FileURLRenewal(t *testing.T) {
 
 	settings := defaultSettings(t)
 	settings.ForbidBacktracking = true
-	hf, err := htfs.Open(getURL, needsRenewal, settings)
+	hf, err := htfs.Open(context.Background(), getURL, needsRenewal, settings)
 	assert.NoError(err)
 
 	assert.EqualValues(1, ctx.numGET, "expected number of GET requests")
@@ -368,7 +369,7 @@ func Test_FileURLRenewal(t *testing.T) {
 
 	ctx.requiredT = 3000
 
-	hf, err = htfs.Open(getURL, needsRenewal, defaultSettings(t))
+	hf, err = htfs.Open(context.Background(), getURL, needsRenewal, defaultSettings(t))
 	assert.NoError(err)
 
 	assert.EqualValues(1, renewalsAdvertised, "number of renewals advertised")

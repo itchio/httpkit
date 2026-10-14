@@ -1,6 +1,7 @@
 package htfs
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -29,7 +30,7 @@ var dumpStats = os.Getenv("HTFS_DUMP_STATS") == "1"
 
 // A GetURLFunc returns a URL we can download the resource from.
 // It's handy to have this as a function rather than a constant for signed expiring URLs
-type GetURLFunc func() (urlString string, err error)
+type GetURLFunc func(ctx context.Context) (urlString string, err error)
 
 // A NeedsRenewalFunc analyzes an HTTP response and returns true if it needs to be renewed
 type NeedsRenewalFunc func(res *http.Response, body []byte) bool
@@ -74,6 +75,7 @@ type File struct {
 	needsRenewal  NeedsRenewalFunc
 	client        *http.Client
 	retrySettings *retrycontext.Settings
+	ctx           context.Context
 
 	Log      LogFunc
 	LogLevel int
@@ -130,7 +132,9 @@ type Settings struct {
 
 // Open returns a new htfs.File. Note that it differs from os.Open in that it does a first request
 // to determine the remote file's size. If that fails (after retries), an error will be returned.
-func Open(getURL GetURLFunc, needsRenewal NeedsRenewalFunc, settings *Settings) (*File, error) {
+// ctx bounds the file's whole life: every request, reads in progress and the
+// sleeps between retries end once it is done.
+func Open(ctx context.Context, getURL GetURLFunc, needsRenewal NeedsRenewalFunc, settings *Settings) (*File, error) {
 	client := settings.Client
 	if client == nil {
 		client = http.DefaultClient
@@ -144,6 +148,7 @@ func Open(getURL GetURLFunc, needsRenewal NeedsRenewalFunc, settings *Settings) 
 	f := &File{
 		getURL:        getURL,
 		retrySettings: &retryCtx.Settings,
+		ctx:           ctx,
 		needsRenewal:  needsRenewal,
 		client:        client,
 		name:          "<remote file>",
@@ -171,7 +176,7 @@ func Open(getURL GetURLFunc, needsRenewal NeedsRenewalFunc, settings *Settings) 
 		f.DumpStats = true
 	}
 
-	urlStr, err := getURL()
+	urlStr, err := getURL(ctx)
 	if err != nil {
 		return nil, errors.Wrapf(normalizeError(err), "htfs.Open (getting URL)")
 	}
@@ -384,7 +389,7 @@ func (f *File) renewURL() (string, error) {
 	f.urlMutex.Lock()
 	defer f.urlMutex.Unlock()
 
-	urlStr, err := f.getURL()
+	urlStr, err := f.getURL(f.ctx)
 	if err != nil {
 		return "", err
 	}
@@ -526,6 +531,11 @@ func (f *File) readAt(data []byte, offset int64) (int, error) {
 }
 
 func (f *File) shouldRetry(err error) bool {
+	// Check f.ctx rather than the error: http.Client timeouts also report
+	// context.DeadlineExceeded, and those should be retried.
+	if f.ctx.Err() != nil {
+		return false
+	}
 	if errors.Cause(err) == io.EOF {
 		// *do* retry EOF, because apparently it's used interchangeably with
 		// 'connection reset' in golang, see https://github.com/itchio/butler/issues/167

@@ -70,7 +70,9 @@ func (c *conn) Connect(offset int64) error {
 				continue
 			} else if hf.shouldRetry(err) {
 				hf.log("[%9d-%9d] (Connect) retrying %v", offset, offset, err)
-				retryCtx.Retry(err)
+				if err := retryCtx.Retry(hf.ctx, err); err != nil {
+					return errors.Wrapf(err, "in conn.Connect")
+				}
 				continue
 			} else {
 				return errors.Wrapf(err, "in conn.Connect, non-retriable error")
@@ -98,7 +100,9 @@ func (c *conn) renewURLWithRetries(offset int64) error {
 		if err != nil {
 			if hf.shouldRetry(err) {
 				hf.log("[%9d-%9d] (Connect) retrying %v", offset, offset, err)
-				renewRetryCtx.Retry(err)
+				if err := renewRetryCtx.Retry(hf.ctx, err); err != nil {
+					return errors.Wrapf(err, "in conn.renewURLWithRetries")
+				}
 				continue
 			} else {
 				hf.log("[%9d-%9d] (Connect) bailing on %v", offset, offset, err)
@@ -114,7 +118,7 @@ func (c *conn) renewURLWithRetries(offset int64) error {
 func (c *conn) tryConnect(offset int64) error {
 	hf := c.file
 
-	req, err := http.NewRequest("GET", hf.currentURL, nil)
+	req, err := http.NewRequestWithContext(hf.ctx, "GET", hf.currentURL, nil)
 	if err != nil {
 		return errors.Wrapf(err, "in conn.tryConnect, while creating new GET request")
 	}

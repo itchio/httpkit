@@ -2,6 +2,7 @@ package uploader
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -40,12 +41,12 @@ func (cu *chunkUploader) put(buf []byte, last bool) error {
 		err := cu.tryPut(buf, last)
 		if err != nil {
 			if ne, ok := err.(*netError); ok {
-				retryCtx.Retry(ne)
+				_ = retryCtx.Retry(context.Background(), ne)
 				continue
 			} else if re, ok := err.(*retryError); ok {
 				cu.offset += re.committedBytes
 				buf = buf[re.committedBytes:]
-				retryCtx.Retry(errors.Errorf("Having troubles uploading some blocks"))
+				_ = retryCtx.Retry(context.Background(), errors.Errorf("Having troubles uploading some blocks"))
 				continue
 			} else {
 				return errors.WithStack(err)
@@ -182,7 +183,7 @@ func (cu *chunkUploader) queryStatus() (*http.Response, error) {
 		res, err := cu.tryQueryStatus()
 		if err != nil {
 			cu.debugf("while querying status of upload: %s", err.Error())
-			retryCtx.Retry(err)
+			_ = retryCtx.Retry(context.Background(), err)
 			continue
 		}
 

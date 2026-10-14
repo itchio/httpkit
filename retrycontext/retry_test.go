@@ -1,6 +1,7 @@
 package retrycontext_test
 
 import (
+	"context"
 	"math"
 	"testing"
 	"time"
@@ -29,7 +30,7 @@ func Test_Retry(t *testing.T) {
 		for ctx.ShouldTry() {
 			if count > 0 {
 				count -= 1
-				ctx.Retry(errors.Errorf("retrying"))
+				_ = ctx.Retry(context.Background(), errors.Errorf("retrying"))
 				continue
 			}
 

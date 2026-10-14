@@ -1,6 +1,7 @@
 package neterr_test
 
 import (
+	"context"
 	"io"
 	"net"
 	"net/http"
@@ -70,7 +71,7 @@ func Test_TcpDial(t *testing.T) {
 
 func Test_File(t *testing.T) {
 	assert := assert.New(t)
-	_, err := htfs.Open(func() (string, error) {
+	_, err := htfs.Open(context.Background(), func(context.Context) (string, error) {
 		return "http://no.example.org", nil
 	}, func(res *http.Response, body []byte) bool {
 		return false
