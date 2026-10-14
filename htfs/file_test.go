@@ -51,7 +51,7 @@ func defaultSettings(t *testing.T) *htfs.Settings {
 		},
 		Log: func(msg string) {
 			t.Helper()
-			t.Logf(msg)
+			t.Log(msg)
 		},
 		LogLevel: 2,
 	}

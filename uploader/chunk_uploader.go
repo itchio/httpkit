@@ -131,7 +131,7 @@ func (cu *chunkUploader) tryPut(buf []byte, last bool) error {
 		} else {
 			status = interpretGcsStatusCode(statusRes.StatusCode)
 			err = errors.Errorf("expected upload status, got HTTP %s (%s) instead", statusRes.Status, status)
-			cu.debugf(err.Error())
+			cu.debugf("%s", err.Error())
 			return errors.Wrap(err, "in chunkUpload.tryPut, after getting non-308 status code")
 		}
 	}

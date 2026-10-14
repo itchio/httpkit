@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/certifi/gocertifi"
-	"github.com/efarrer/iothrottler"
 	"github.com/getlantern/idletiming"
 	"github.com/pkg/errors"
 	"golang.org/x/net/http2"
@@ -30,14 +29,6 @@ const (
 	// DefaultIdleTimeout is the duration after which, if there's no I/O activity, we declare a connection dead
 	DefaultIdleTimeout = 60 * time.Second
 )
-
-// ThrottlerPool is the singleton pool from `iothrottler`
-// that package timeout uses to manage all connections.
-var ThrottlerPool *iothrottler.IOThrottlerPool
-
-func init() {
-	ThrottlerPool = iothrottler.NewIOThrottlerPool(iothrottler.Unlimited)
-}
 
 var simulateOffline = false
 var conns = make(map[net.Conn]bool)
@@ -63,14 +54,9 @@ func timeoutDialer(cTimeout time.Duration, rwTimeout time.Duration) func(net, ad
 		if err != nil {
 			return nil, errors.WithStack(err)
 		}
-		// respect global throttle settings
-		throttledConn, err := ThrottlerPool.AddConn(timeoutConn)
-		if err != nil {
-			return nil, errors.WithStack(err)
-		}
 		// measure bps
 		monitorConn := &monitoringConn{
-			Conn: throttledConn,
+			Conn: bandwidth.conn(timeoutConn),
 		}
 		// if we stay idle too long, close
 		idleConn := idletiming.Conn(monitorConn, rwTimeout, func() {
@@ -86,6 +72,9 @@ func NewClient(connectTimeout time.Duration, readWriteTimeout time.Duration) *ht
 		Proxy:           http.ProxyFromEnvironment,
 		Dial:            timeoutDialer(connectTimeout, readWriteTimeout),
 		IdleConnTimeout: readWriteTimeout,
+		// net/http disables HTTP/2 when a custom Dial is set, and on Go 1.27+
+		// http2.ConfigureTransport no longer overrides that.
+		ForceAttemptHTTP2: true,
 	}
 	if IgnoreCertificateErrors {
 		transport.TLSClientConfig = &tls.Config{
