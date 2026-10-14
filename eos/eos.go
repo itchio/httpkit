@@ -64,6 +64,9 @@ func (shr *simpleHTTPResource) NeedsRenewal(res *http.Response, body []byte) boo
 	return false
 }
 
+// Open returns a File for a local path or a remote URL. For a remote file
+// ctx governs its whole life, not just the open: reads in progress, URL
+// renewals and retry sleeps all end once it is done.
 func Open(ctx context.Context, name string, opts ...option.Option) (File, error) {
 	f, err := realOpen(ctx, name, opts...)
 	if err != nil {

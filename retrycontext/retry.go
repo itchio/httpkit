@@ -49,15 +49,16 @@ func NewDefault() *Context {
 //
 // ----------------------------------------
 //
-//	for rc.ShouldRetry() {
+//	for rc.ShouldTry() {
 //		 err := someOperation()
 //		 if err != nil {
-//			 if isRetriable(err) {
-//				 if err := rc.Retry(ctx, err); err != nil {
-//					 return err
-//				 }
-//				 continue
+//			 if !isRetriable(err) {
+//				 return err
 //			 }
+//			 if err := rc.Retry(ctx, err); err != nil {
+//				 return err
+//			 }
+//			 continue
 //		 }
 //
 //		 // succeeded!
