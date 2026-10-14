@@ -2,6 +2,8 @@ package uploader
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -10,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -34,12 +37,11 @@ func Test_ChunkUploader(t *testing.T) {
 	server := makeTestServer(t, log)
 	server.settings.latency = 200 * time.Millisecond
 	server.settings.bandwidthBytesPerSec = 10 * 1024 * 1024 // 10 MB/s
-	ru := NewResumableUpload(server.URL)
-	ru.SetConsumer(&state.Consumer{
+	ru := NewResumableUpload(context.Background(), server.URL, WithConsumer(&state.Consumer{
 		OnMessage: func(lvl string, msg string) {
 			log("[%s] %s", lvl, msg)
 		},
-	})
+	}))
 
 	ref := new(bytes.Buffer)
 	mw := io.MultiWriter(ref, ru)
@@ -52,6 +54,59 @@ func Test_ChunkUploader(t *testing.T) {
 
 	assert.EqualValues(ref.Bytes(), server.state.data)
 	log("num blocks stored: %+v", server.state.numBlocksStored)
+}
+
+// A server that never answers a PUT: without cancellation the upload
+// would block in Write or Close forever.
+func Test_ChunkUploaderCancel(t *testing.T) {
+	arrived := make(chan struct{})
+	var arrivedOnce sync.Once
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		arrivedOnce.Do(func() { close(arrived) })
+		// the server only notices the client leaving once the body has
+		// been read; release is there so Close can't hang if it doesn't
+		io.Copy(io.Discard, r.Body)
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer func() {
+		close(release)
+		server.Close()
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ru := NewResumableUpload(ctx, server.URL)
+
+	result := make(chan error, 1)
+	go func() {
+		for range 64 {
+			if err := fullyrandom.Write(ru, 1*1024*1024, time.Now().UnixNano()); err != nil {
+				result <- err
+				return
+			}
+		}
+		result <- ru.Close()
+	}()
+
+	select {
+	case <-arrived:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no PUT reached the server")
+	}
+	cancel()
+
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context.Canceled, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("upload did not stop after cancel")
+	}
 }
 
 type fakeGCS struct {

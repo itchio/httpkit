@@ -2,21 +2,19 @@ package uploader
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/itchio/headway/state"
 	"github.com/itchio/httpkit/timeout"
 	"github.com/pkg/errors"
 )
 
 type resumableUpload struct {
-	maxChunkGroup    int
-	consumer         *state.Consumer
-	progressListener ProgressListenerFunc
-
+	maxChunkGroup int
 	closed        bool
 	err           error
 	errMu         sync.RWMutex
@@ -32,8 +30,6 @@ type resumableUpload struct {
 // to google cloud storage.
 type ResumableUpload interface {
 	io.WriteCloser
-	SetConsumer(consumer *state.Consumer)
-	SetProgressListener(progressListener ProgressListenerFunc)
 }
 
 type rblock struct {
@@ -43,24 +39,27 @@ type rblock struct {
 
 const rblockSize = 256 * 1024
 
-var seed = 0
+var seed atomic.Int64
 
 var _ ResumableUpload = (*resumableUpload)(nil)
 
 // NewResumableUpload starts a new resumable upload session
-// targeting the specified Google Cloud Storage uploadURL.
-func NewResumableUpload(uploadURL string, opts ...Option) ResumableUpload {
+// targeting the specified Google Cloud Storage uploadURL. Cancelling ctx
+// aborts the upload: Write and Close then return ctx's error.
+func NewResumableUpload(ctx context.Context, uploadURL string, opts ...Option) ResumableUpload {
 	s := defaultSettings()
 	for _, o := range opts {
 		o.Apply(s)
 	}
 
-	id := seed
-	seed++
+	id := int(seed.Add(1) - 1)
 	chunkUploader := &chunkUploader{
-		uploadURL:  uploadURL,
-		httpClient: timeout.NewClient(resumableConnectTimeout, resumableIdleTimeout),
-		id:         id,
+		ctx:              ctx,
+		uploadURL:        uploadURL,
+		httpClient:       timeout.NewClient(resumableConnectTimeout, resumableIdleTimeout),
+		id:               id,
+		consumer:         s.Consumer,
+		progressListener: s.ProgressListener,
 	}
 
 	ru := &resumableUpload{
@@ -76,7 +75,7 @@ func NewResumableUpload(uploadURL string, opts ...Option) ResumableUpload {
 	}
 	ru.splitBuf.Grow(rblockSize)
 
-	go ru.work()
+	go ru.work(ctx)
 
 	return ru
 }
@@ -88,10 +87,10 @@ func (ru *resumableUpload) Write(buf []byte) (int, error) {
 	written := 0
 	for written < len(buf) {
 		if err := ru.checkError(); err != nil {
-			return 0, err
+			return written, err
 		}
 		if ru.closed {
-			return 0, nil
+			return written, nil
 		}
 
 		availRead := len(buf) - written
@@ -99,9 +98,8 @@ func (ru *resumableUpload) Write(buf []byte) (int, error) {
 
 		if availWrite == 0 {
 			// flush!
-			data := sb.Bytes()
-			ru.blocks <- &rblock{
-				data: append([]byte{}, data...),
+			if err := ru.sendBlock(sb.Bytes()); err != nil {
+				return written, err
 			}
 			sb.Reset()
 			availWrite = sb.Cap()
@@ -129,9 +127,8 @@ func (ru *resumableUpload) Close() error {
 	ru.closed = true
 
 	// flush!
-	data := ru.splitBuf.Bytes()
-	ru.blocks <- &rblock{
-		data: append([]byte{}, data...),
+	if err := ru.sendBlock(ru.splitBuf.Bytes()); err != nil {
+		return errors.Wrapf(err, "in resumableUpload.Close")
 	}
 	close(ru.blocks)
 
@@ -145,21 +142,33 @@ func (ru *resumableUpload) Close() error {
 	return ru.checkError()
 }
 
-func (ru *resumableUpload) SetConsumer(consumer *state.Consumer) {
-	ru.consumer = consumer
-	ru.chunkUploader.consumer = consumer
-}
-
-func (ru *resumableUpload) SetProgressListener(progressListener ProgressListenerFunc) {
-	ru.chunkUploader.progressListener = progressListener
-}
-
 //===========================================
 // internal functions
 //===========================================
 
-func (ru *resumableUpload) work() {
+// sendBlock hands a copy of data to work(), unless the upload has
+// already failed, in which case nobody is receiving anymore.
+func (ru *resumableUpload) sendBlock(data []byte) error {
+	block := &rblock{
+		data: append([]byte{}, data...),
+	}
+	select {
+	case ru.blocks <- block:
+		return nil
+	case <-ru.pushedErr:
+		return ru.checkError()
+	}
+}
+
+func (ru *resumableUpload) work(ctx context.Context) {
 	defer close(ru.done)
+
+	// stopped before done closes, so a cancel arriving after a finished
+	// upload can't turn its success into an error
+	stop := context.AfterFunc(ctx, func() {
+		ru.pushError(context.Cause(ctx))
+	})
+	defer stop()
 
 	sendBuf := new(bytes.Buffer)
 	sendBuf.Grow(ru.maxChunkGroup * rblockSize)
@@ -168,10 +177,23 @@ func (ru *resumableUpload) work() {
 	// same as ru.blocks, but `.last` is set properly, no matter
 	// what the size is
 	annotatedBlocks := make(chan *rblock, ru.maxChunkGroup)
+	annotated := make(chan struct{})
+	defer func() { <-annotated }()
 	go func() {
-		var lastBlock *rblock
+		defer close(annotated)
 		defer close(annotatedBlocks)
 
+		// once the upload has failed nobody drains annotatedBlocks
+		queue := func(b *rblock) bool {
+			select {
+			case annotatedBlocks <- b:
+				return true
+			case <-ru.pushedErr:
+				return false
+			}
+		}
+
+		var lastBlock *rblock
 	annotate:
 		for {
 			select {
@@ -181,9 +203,8 @@ func (ru *resumableUpload) work() {
 					break annotate
 				}
 
-				// queue block
-				if lastBlock != nil {
-					annotatedBlocks <- lastBlock
+				if lastBlock != nil && !queue(lastBlock) {
+					return
 				}
 				lastBlock = b
 			case <-ru.pushedErr:
@@ -194,7 +215,7 @@ func (ru *resumableUpload) work() {
 
 		if lastBlock != nil {
 			lastBlock.last = true
-			annotatedBlocks <- lastBlock
+			queue(lastBlock)
 		}
 	}()
 
@@ -279,9 +300,9 @@ aggregate:
 }
 
 func (ru *resumableUpload) debugf(msg string, args ...any) {
-	if ru.consumer != nil {
+	if c := ru.chunkUploader.consumer; c != nil {
 		fmsg := fmt.Sprintf(msg, args...)
-		ru.consumer.Debugf("[ru-%d] %s", ru.id, fmsg)
+		c.Debugf("[ru-%d] %s", ru.id, fmsg)
 	}
 }
 

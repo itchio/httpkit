@@ -20,12 +20,10 @@ import (
 type ProgressListenerFunc func(count int64)
 
 type chunkUploader struct {
-	// constructor
-	uploadURL  string
-	httpClient *http.Client
-	id         int
-
-	// set later
+	ctx              context.Context
+	uploadURL        string
+	httpClient       *http.Client
+	id               int
 	progressListener ProgressListenerFunc
 	consumer         *state.Consumer
 
@@ -41,12 +39,16 @@ func (cu *chunkUploader) put(buf []byte, last bool) error {
 		err := cu.tryPut(buf, last)
 		if err != nil {
 			if ne, ok := err.(*netError); ok {
-				_ = retryCtx.Retry(context.Background(), ne)
+				if err := retryCtx.Retry(cu.ctx, ne); err != nil {
+					return err
+				}
 				continue
 			} else if re, ok := err.(*retryError); ok {
 				cu.offset += re.committedBytes
 				buf = buf[re.committedBytes:]
-				_ = retryCtx.Retry(context.Background(), errors.Errorf("Having troubles uploading some blocks"))
+				if err := retryCtx.Retry(cu.ctx, errors.Errorf("Having troubles uploading some blocks")); err != nil {
+					return err
+				}
 				continue
 			} else {
 				return errors.WithStack(err)
@@ -75,7 +77,7 @@ func (cu *chunkUploader) tryPut(buf []byte, last bool) error {
 		}
 	}, body)
 
-	req, err := http.NewRequest("PUT", cu.uploadURL, countingReader)
+	req, err := http.NewRequestWithContext(cu.ctx, "PUT", cu.uploadURL, countingReader)
 	if err != nil {
 		// does not include HTTP errors, more like golang API usage errors
 		return errors.WithStack(err)
@@ -106,6 +108,7 @@ func (cu *chunkUploader) tryPut(buf []byte, last bool) error {
 		cu.debugf("while uploading %d-%d: \n%s", start, end, err.Error())
 		return &netError{err, gcsUnknown}
 	}
+	defer res.Body.Close()
 
 	callDuration := time.Since(startTime)
 	cu.debugf("← %s (in %s)", res.Status, callDuration)
@@ -123,6 +126,7 @@ func (cu *chunkUploader) tryPut(buf []byte, last bool) error {
 			// this happens after we retry the query a few times
 			return errors.Wrap(err, "in chunkUpload.tryPut, while querying status")
 		}
+		defer statusRes.Body.Close()
 
 		if statusRes.StatusCode == 308 {
 			cu.debugf("  ← Got upload status, trying to resume")
@@ -183,7 +187,9 @@ func (cu *chunkUploader) queryStatus() (*http.Response, error) {
 		res, err := cu.tryQueryStatus()
 		if err != nil {
 			cu.debugf("while querying status of upload: %s", err.Error())
-			_ = retryCtx.Retry(context.Background(), err)
+			if err := retryCtx.Retry(cu.ctx, err); err != nil {
+				return nil, err
+			}
 			continue
 		}
 
@@ -194,7 +200,7 @@ func (cu *chunkUploader) queryStatus() (*http.Response, error) {
 }
 
 func (cu *chunkUploader) tryQueryStatus() (*http.Response, error) {
-	req, err := http.NewRequest("PUT", cu.uploadURL, nil)
+	req, err := http.NewRequestWithContext(cu.ctx, "PUT", cu.uploadURL, nil)
 	if err != nil {
 		// does not include HTTP errors, more like golang API usage errors
 		return nil, errors.WithStack(err)
@@ -215,6 +221,7 @@ func (cu *chunkUploader) tryQueryStatus() (*http.Response, error) {
 		return res, nil
 	}
 
+	res.Body.Close()
 	return nil, errors.Errorf("while querying status, got HTTP %s (status %s)", res.Status, status)
 }
 

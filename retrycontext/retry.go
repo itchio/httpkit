@@ -82,6 +82,9 @@ func (rc *Context) ShouldTry() bool {
 // should stop retrying.
 func (rc *Context) Retry(ctx context.Context, err error) error {
 	rc.LastError = err
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 
 	if rc.Settings.Consumer != nil {
 		rc.Settings.Consumer.PauseProgress()
