@@ -107,10 +107,7 @@ func (ru *resumableUpload) Write(buf []byte) (int, error) {
 			availWrite = sb.Cap()
 		}
 
-		copySize := availRead
-		if copySize > availWrite {
-			copySize = availWrite
-		}
+		copySize := min(availRead, availWrite)
 
 		// buffer!
 		sb.Write(buf[written : written+copySize])
@@ -281,7 +278,7 @@ aggregate:
 	}
 }
 
-func (ru *resumableUpload) debugf(msg string, args ...interface{}) {
+func (ru *resumableUpload) debugf(msg string, args ...any) {
 	if ru.consumer != nil {
 		fmsg := fmt.Sprintf(msg, args...)
 		ru.consumer.Debugf("[ru-%d] %s", ru.id, fmsg)

@@ -32,6 +32,6 @@ func (hfi *FileInfo) IsDir() bool {
 	return false
 }
 
-func (hfi *FileInfo) Sys() interface{} {
+func (hfi *FileInfo) Sys() any {
 	return nil
 }

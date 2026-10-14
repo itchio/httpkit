@@ -45,7 +45,7 @@ func Test_Retry(t *testing.T) {
 
 	sleepLowerBound := func(failCount int) time.Duration {
 		var bound time.Duration
-		for i := 0; i < failCount; i++ {
+		for i := range failCount {
 			n := int(math.Pow(2, float64(i)))
 			bound += time.Second * time.Duration(n)
 		}

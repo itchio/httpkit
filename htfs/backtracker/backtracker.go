@@ -151,10 +151,7 @@ func (bt *backtracker) Discard(n int64) error {
 	discardlen := int64(len(bt.discardBuf))
 
 	for n > 0 {
-		readlen := n
-		if readlen > discardlen {
-			readlen = discardlen
-		}
+		readlen := min(n, discardlen)
 
 		discarded, err := bt.Read(bt.discardBuf[:readlen])
 		if err != nil {

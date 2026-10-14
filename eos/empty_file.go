@@ -59,6 +59,6 @@ func (ns *nullStats) Name() string {
 	return "/dev/null"
 }
 
-func (ns *nullStats) Sys() interface{} {
+func (ns *nullStats) Sys() any {
 	return nil
 }

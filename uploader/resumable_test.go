@@ -23,7 +23,7 @@ import (
 func Test_ChunkUploader(t *testing.T) {
 	assert := assert.New(t)
 	loudTests := os.Getenv("LOUD_TESTS") == "1"
-	log := func(format string, a ...interface{}) {
+	log := func(format string, a ...any) {
 		if loudTests {
 			log.Printf(format, a...)
 		} else {
@@ -44,7 +44,7 @@ func Test_ChunkUploader(t *testing.T) {
 	ref := new(bytes.Buffer)
 	mw := io.MultiWriter(ref, ru)
 
-	for i := 0; i < 16; i++ {
+	for range 16 {
 		tmust(t, fullyrandom.Write(mw, 1*1024*1024, time.Now().UnixNano()))
 		time.Sleep(500 * time.Millisecond)
 	}
@@ -67,7 +67,7 @@ type fakeGCS struct {
 	}
 }
 
-func makeTestServer(t *testing.T, log func(msg string, a ...interface{})) *fakeGCS {
+func makeTestServer(t *testing.T, log func(msg string, a ...any)) *fakeGCS {
 	fg := &fakeGCS{}
 
 	var chunkSize int64 = 256 * 1024

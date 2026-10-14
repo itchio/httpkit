@@ -129,9 +129,9 @@ func Test_FileRequestTimeoutIsRetried(t *testing.T) {
 }
 
 func Test_FileContextCancelsBackoff(t *testing.T) {
-	var calls int32
+	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer server.Close()
@@ -164,7 +164,7 @@ func Test_FileContextCancelsBackoff(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("open did not return after cancel during backoff")
 	}
-	if got := atomic.LoadInt32(&calls); got != 1 {
+	if got := calls.Load(); got != 1 {
 		t.Fatalf("expected no request after cancel, got %d", got)
 	}
 }
@@ -178,9 +178,9 @@ func Test_FileContextStopsURLRenewal(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var getURLCalls int32
+	var getURLCalls atomic.Int32
 	getURL := func(context.Context) (string, error) {
-		if atomic.AddInt32(&getURLCalls, 1) == 1 {
+		if getURLCalls.Add(1) == 1 {
 			return server.URL, nil
 		}
 		return "", &net.OpError{Op: "dial", Err: errors.New("refused")}
@@ -211,7 +211,7 @@ func Test_FileContextStopsURLRenewal(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("open did not return after cancel during renewal backoff")
 	}
-	if got := atomic.LoadInt32(&getURLCalls); got != 2 {
+	if got := getURLCalls.Load(); got != 2 {
 		t.Fatalf("expected no renewal call after cancel, got %d getURL calls", got)
 	}
 }

@@ -86,7 +86,7 @@ func (cf *CheckingFile) ReadAt(tBuf []byte, offset int64) (int, error) {
 
 	if !bytes.Equal(rBuf[:rReadBytes], tBuf[:rReadBytes]) {
 		firstDifferent := rReadBytes
-		for i := 0; i < rReadBytes; i++ {
+		for i := range rReadBytes {
 			if rBuf[i] != tBuf[i] {
 				firstDifferent = i
 				break
@@ -94,7 +94,7 @@ func (cf *CheckingFile) ReadAt(tBuf []byte, offset int64) (int, error) {
 		}
 
 		numDifferent := 0
-		for i := 0; i < rReadBytes; i++ {
+		for i := range rReadBytes {
 			if rBuf[i] != tBuf[i] {
 				numDifferent++
 			}

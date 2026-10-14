@@ -662,7 +662,7 @@ func (f *File) knownSize() bool {
 	return f.size > 0
 }
 
-func (f *File) log(format string, args ...interface{}) {
+func (f *File) log(format string, args ...any) {
 	if f.Log == nil {
 		return
 	}
@@ -670,7 +670,7 @@ func (f *File) log(format string, args ...interface{}) {
 	f.Log(fmt.Sprintf(format, args...))
 }
 
-func (f *File) log2(format string, args ...interface{}) {
+func (f *File) log2(format string, args ...any) {
 	if f.LogLevel < 2 {
 		return
 	}

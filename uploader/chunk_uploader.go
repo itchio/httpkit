@@ -218,7 +218,7 @@ func (cu *chunkUploader) tryQueryStatus() (*http.Response, error) {
 	return nil, errors.Errorf("while querying status, got HTTP %s (status %s)", res.Status, status)
 }
 
-func (cu *chunkUploader) debugf(msg string, args ...interface{}) {
+func (cu *chunkUploader) debugf(msg string, args ...any) {
 	if cu.consumer != nil {
 		fmsg := fmt.Sprintf(msg, args...)
 		cu.consumer.Debugf("[cu-%d] %s", cu.id, fmsg)

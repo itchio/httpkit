@@ -532,7 +532,7 @@ func Test_FileConcurrentReadAt(t *testing.T) {
 
 	maxReaders := 0
 
-	for i := 0; i < len(fakeData); i++ {
+	for range fakeData {
 		NumConns := hf.NumConns()
 		if NumConns > maxReaders {
 			maxReaders = NumConns

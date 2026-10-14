@@ -14,7 +14,7 @@ import (
 func Test_BackTrackerTiny(t *testing.T) {
 	assert := assert.New(t)
 	var buf []byte
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		buf = append(buf, byte(i))
 	}
 
@@ -91,7 +91,7 @@ func Test_BackTrackerTiny(t *testing.T) {
 func Test_BacktrackerNoCache(t *testing.T) {
 	assert := assert.New(t)
 	var buf []byte
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		buf = append(buf, byte(i))
 	}
 
@@ -105,7 +105,7 @@ func Test_BacktrackerNoCache(t *testing.T) {
 func Test_BacktrackerRidiculousCache(t *testing.T) {
 	assert := assert.New(t)
 	var buf []byte
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		buf = append(buf, byte(i))
 	}
 
